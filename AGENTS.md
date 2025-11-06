@@ -17,6 +17,27 @@ These guidelines tell automation (and humans) how to contribute changes here.
 - Open a Pull Request into `master` with a concise description and checklist of changes.
 - Keep PRs focused and reasonably small. Avoid bundling unrelated changes.
 
+### Creating PRs with multi‑line bodies (no escaping issues)
+
+When using `gh pr create`, avoid passing multi‑line `--body` text directly if it contains backticks or shell‑sensitive characters. Prefer a quoted heredoc to preserve newlines and prevent command substitution:
+
+```
+gh pr create \
+  --title "feat(x): short title" \
+  --body "$(cat << 'EOF'
+Summary line
+
+- Bullet 1
+- Bullet 2 with `inline code`
+
+Notes:
+- Backticks and $VARIABLES are safe because of the quoted heredoc.
+EOF
+)"
+```
+
+Alternatively, write the body to a file and use `--body-file <path>`.
+
 ## Checkpointed Workflow (with user signals)
 
 - Branch creation: wait for explicit user signal before creating a new branch.
