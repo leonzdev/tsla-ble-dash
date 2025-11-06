@@ -83,7 +83,8 @@ export function initializeApp(root: HTMLElement): void {
   formLabel.append(formSelect);
 
   const enrollBtn = createButton('Enroll Key');
-  enrollRow.append(roleLabel, formLabel, enrollBtn.button);
+  const verifyEnrollBtn = createButton('Verify Enrollment');
+  enrollRow.append(roleLabel, formLabel, enrollBtn.button, verifyEnrollBtn.button);
 
   const stateRow = document.createElement('div');
   stateRow.className = 'tsla-row';
@@ -316,6 +317,33 @@ export function initializeApp(root: HTMLElement): void {
     }
   });
 
+  verifyEnrollBtn.button.addEventListener('click', async () => {
+    try {
+      if (!session) {
+        throw new Error('Select a vehicle first');
+      }
+      const pem = privateKeyInput.textarea.value.trim();
+      privateKey = await ensurePrivateKey(pem, privateKey);
+      appendLog(logOutput, 'Verifying enrollment by establishing a session…');
+      const maxAttempts = 12; // ~1 minute with 5s interval
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await session.ensureSession(privateKey);
+          appendLog(logOutput, `Verification successful on attempt ${attempt}. Session established.`);
+          return;
+        } catch (err) {
+          if (attempt === maxAttempts) {
+            throw err;
+          }
+          appendLog(logOutput, `Attempt ${attempt} failed. Waiting before retry…`);
+          await sleep(5000);
+        }
+      }
+    } catch (error) {
+      reportError(logOutput, error, 'Enrollment verification failed');
+    }
+  });
+
   privateKeyInput.textarea.addEventListener('input', () => {
     privateKey = null;
   });
@@ -417,6 +445,10 @@ function option(label: string, value: string) {
   o.value = value;
   o.textContent = label;
   return o;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function loadStoredProfiles(): StoredProfile[] {
