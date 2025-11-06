@@ -81,6 +81,7 @@ export function initializeApp(root: HTMLElement): void {
   formSelect.append(option('iOS Device', String(KeyFormFactor.KEY_FORM_FACTOR_IOS_DEVICE)));
   formSelect.append(option('Android Device', String(KeyFormFactor.KEY_FORM_FACTOR_ANDROID_DEVICE)));
   formSelect.append(option('NFC Card', String(KeyFormFactor.KEY_FORM_FACTOR_NFC_CARD)));
+  formSelect.append(option('Cloud Key', String(KeyFormFactor.KEY_FORM_FACTOR_CLOUD_KEY)));
   formLabel.append(formSelect);
 
   const enrollBtn = createButton('Enroll Key');
