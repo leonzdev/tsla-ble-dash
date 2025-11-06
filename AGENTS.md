@@ -27,6 +27,16 @@ These guidelines tell automation (and humans) how to contribute changes here.
   - Prefer a new branch if the request is out of scope or large enough to delay the current PR.
 - Never merge; leave merging to the user or CI/maintainers.
 
+### Deciding whether to append to the current PR or start a new one
+
+1) Check if there is an open PR for the current branch or topic.
+   - Use `gh pr status` or `gh pr view <number> --json state,isDraft,mergedAt`.
+2) If the latest/current PR is closed or merged, do NOT push more commits to that branch.
+   - Update local `master` and create a new feature branch for follow‑ups.
+3) If the PR is open:
+   - Append commits if the follow‑up is clearly in‑scope and keeps the PR focused.
+   - Otherwise, propose a new branch/PR and confirm with the user.
+
 ## Commits
 
 - Use Conventional Commits style when possible:
