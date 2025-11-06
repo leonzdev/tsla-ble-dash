@@ -40,22 +40,18 @@ export class TeslaBleTransport extends EventTarget {
   }
 
   async requestDevice(): Promise<BluetoothDevice> {
-    const filters = [
-      { services: [TESLA_SERVICE_UUID] },
-    ];
-
     const options: RequestDeviceOptions = {
-      filters,
+      acceptAllDevices: true,
       optionalServices: [TESLA_SERVICE_UUID],
-    };
+    } as RequestDeviceOptions;
 
     const device = await navigator.bluetooth.requestDevice(options);
     if (this.options.vin) {
       const expectedPrefix = await this.vinToLocalName(this.options.vin);
       if (device.name && expectedPrefix && !device.name.startsWith(expectedPrefix)) {
-        console.warn(
-          `Selected device name "${device.name}" does not match expected VIN beacon prefix ${expectedPrefix}`,
-        );
+        const msg = `Selected device name "${device.name}" does not match expected VIN beacon prefix ${expectedPrefix}. Please select a different device.`;
+        console.warn(msg);
+        throw new Error(msg);
       }
     }
     return device;

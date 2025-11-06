@@ -261,6 +261,9 @@ export function initializeApp(root: HTMLElement): void {
       appendLog(logOutput, 'Bluetooth device selected and GATT connected.');
     } catch (error) {
       reportError(logOutput, error, 'Failed to select device');
+      if (error instanceof Error && /VIN beacon prefix/.test(error.message)) {
+        appendLog(logOutput, 'Tip: Click "Select Vehicle" again and choose the device whose name matches your VIN beacon (SxxxxxxxxC).');
+      }
     }
   });
 
