@@ -71,6 +71,7 @@ export function initializeApp(root: HTMLElement): void {
   roleSelect.className = 'tsla-select';
   roleSelect.append(option('Driver', String(KeyRole.ROLE_DRIVER)));
   roleSelect.append(option('Owner', String(KeyRole.ROLE_OWNER)));
+  roleSelect.append(option('Vehicle Monitor', String(KeyRole.ROLE_VEHICLE_MONITOR)));
   roleLabel.append(roleSelect);
 
   const formLabel = document.createElement('label');

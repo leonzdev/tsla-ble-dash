@@ -5,6 +5,10 @@ These guidelines tell automation (and humans) how to contribute changes here.
 ## Branching & PRs
 
 - Never push changes directly to `master`.
+- Always update local `master` before branching:
+  - `git fetch origin`
+  - `git checkout master`
+  - `git reset --hard origin/master` (or `git pull --ff-only` if no divergence)
 - For any new work, create a feature branch from `master` using the pattern:
   - `feat/<short-topic>` for features
   - `fix/<short-topic>` for bug fixes
