@@ -324,6 +324,9 @@ export function initializeApp(root: HTMLElement): void {
       }
       const pem = privateKeyInput.textarea.value.trim();
       privateKey = await ensurePrivateKey(pem, privateKey);
+      // Guard against double clicks
+      verifyEnrollBtn.button.disabled = true;
+      enrollBtn.button.disabled = true;
       appendLog(logOutput, 'Verifying enrollment by establishing a session…');
       const maxAttempts = 12; // ~1 minute with 5s interval
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -335,12 +338,15 @@ export function initializeApp(root: HTMLElement): void {
           if (attempt === maxAttempts) {
             throw err;
           }
-          appendLog(logOutput, `Attempt ${attempt} failed. Waiting before retry…`);
+          appendLog(logOutput, `Attempt ${attempt} failed. Waiting 5s before retry…`);
           await sleep(5000);
         }
       }
     } catch (error) {
       reportError(logOutput, error, 'Enrollment verification failed');
+    } finally {
+      verifyEnrollBtn.button.disabled = false;
+      enrollBtn.button.disabled = false;
     }
   });
 
