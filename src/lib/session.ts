@@ -45,6 +45,9 @@ import {
   carServerResponseToObject,
   StateCategory,
   UniversalDomain,
+  encodeVcsecAddKeyRequest,
+  KeyRole,
+  KeyFormFactor,
 } from './protocol';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -117,6 +120,17 @@ export class TeslaBleSession {
     this.connected = false;
     this.sessionState = null;
     this.failPending(new Error('Disconnected'));
+  }
+
+  async sendAddKeyRequest(params: { publicKeyRaw: Uint8Array; role?: number; formFactor?: number }): Promise<void> {
+    // BLE-only flow; no authenticated session required. The vehicle will prompt for NFC tap.
+    if (!this.connected) {
+      await this.connect();
+    }
+    const role = params.role ?? KeyRole.ROLE_DRIVER;
+    const formFactor = params.formFactor ?? KeyFormFactor.KEY_FORM_FACTOR_IOS_DEVICE;
+    const payload = encodeVcsecAddKeyRequest({ publicKeyRaw: params.publicKeyRaw, role, formFactor });
+    await this.transport.send(payload);
   }
 
   async ensureSession(privateKey: CryptoKey): Promise<void> {

@@ -13,6 +13,14 @@ const CarServerAction = root.lookupType('CarServer.Action');
 const CarServerResponseType = root.lookupType('CarServer.Response');
 const GetVehicleData = root.lookupType('CarServer.GetVehicleData');
 const VehicleData = root.lookupType('CarServer.VehicleData');
+// VCSEC (Vehicle Security Controller) types
+const VCSEC_UnsignedMessage = root.lookupType('VCSEC.UnsignedMessage');
+const VCSEC_ToVCSECMessage = root.lookupType('VCSEC.ToVCSECMessage');
+const VCSEC_SignedMessage = root.lookupType('VCSEC.SignedMessage');
+const VCSEC_PermissionChange = root.lookupType('VCSEC.PermissionChange');
+const VCSEC_WhitelistOperation = root.lookupType('VCSEC.WhitelistOperation');
+const VCSEC_PublicKey = root.lookupType('VCSEC.PublicKey');
+const VCSEC_KeyMetadata = root.lookupType('VCSEC.KeyMetadata');
 
 export const UniversalDomain = {
   DOMAIN_BROADCAST: 0,
@@ -36,6 +44,30 @@ export enum StateCategory {
   SoftwareUpdate = 'softwareUpdate',
   ParentalControls = 'parentalControls',
 }
+
+export const VcsecSignatureType = {
+  SIGNATURE_TYPE_NONE: 0,
+  SIGNATURE_TYPE_PRESENT_KEY: 2,
+} as const;
+
+export const KeyRole = {
+  ROLE_NONE: 0,
+  ROLE_SERVICE: 1,
+  ROLE_OWNER: 2,
+  ROLE_DRIVER: 3,
+  ROLE_FM: 4,
+  ROLE_VEHICLE_MONITOR: 5,
+  ROLE_CHARGING_MANAGER: 6,
+  ROLE_GUEST: 8,
+} as const;
+
+export const KeyFormFactor = {
+  KEY_FORM_FACTOR_UNKNOWN: 0,
+  KEY_FORM_FACTOR_NFC_CARD: 1,
+  KEY_FORM_FACTOR_IOS_DEVICE: 6,
+  KEY_FORM_FACTOR_ANDROID_DEVICE: 7,
+  KEY_FORM_FACTOR_CLOUD_KEY: 9,
+} as const;
 
 export interface SessionInfoData {
   counter: number;
@@ -156,6 +188,29 @@ export function carServerResponseToObject(message: any): any {
 export function decodeVehicleData(buffer: Uint8Array): any {
   const response = decodeCarServerResponse(buffer);
   return VehicleData.toObject(response.vehicleData ?? {}, { longs: Number, enums: Number, bytes: Array });
+}
+
+export function encodeVcsecAddKeyRequest(params: { publicKeyRaw: Uint8Array; role: number; formFactor: number }): Uint8Array {
+  const op = VCSEC_WhitelistOperation.create({
+    addKeyToWhitelistAndAddPermissions: VCSEC_PermissionChange.create({
+      key: VCSEC_PublicKey.create({ publicKeyRaw: params.publicKeyRaw }),
+      keyRole: params.role,
+    }),
+    metadataForKey: VCSEC_KeyMetadata.create({ keyFormFactor: params.formFactor }),
+  });
+
+  const unsigned = VCSEC_UnsignedMessage.create({
+    whitelistOperation: op,
+  });
+  const unsignedBytes = VCSEC_UnsignedMessage.encode(unsigned).finish();
+
+  const envelope = VCSEC_ToVCSECMessage.create({
+    signedMessage: VCSEC_SignedMessage.create({
+      protobufMessageAsBytes: unsignedBytes,
+      signatureType: VcsecSignatureType.SIGNATURE_TYPE_PRESENT_KEY,
+    }),
+  });
+  return VCSEC_ToVCSECMessage.encode(envelope).finish();
 }
 
 function stateCategoryToProtoField(category: StateCategory): Record<string, unknown> {

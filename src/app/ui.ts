@@ -1,5 +1,5 @@
 import { TeslaBleSession, VehicleStateResult } from '../lib/session';
-import { StateCategory } from '../lib/protocol';
+import { StateCategory, KeyRole, KeyFormFactor } from '../lib/protocol';
 import {
   generatePrivateKey,
   importPrivateKeyPkcs8,
@@ -62,6 +62,29 @@ export function initializeApp(root: HTMLElement): void {
 
   buttonsRow.append(generateKeyBtn.button, selectDeviceBtn.button, connectBtn.button, fetchStateBtn.button);
 
+  // Enrollment controls
+  const enrollRow = document.createElement('div');
+  enrollRow.className = 'tsla-row';
+  const roleLabel = document.createElement('label');
+  roleLabel.textContent = 'Key Role';
+  const roleSelect = document.createElement('select');
+  roleSelect.className = 'tsla-select';
+  roleSelect.append(option('Driver', String(KeyRole.ROLE_DRIVER)));
+  roleSelect.append(option('Owner', String(KeyRole.ROLE_OWNER)));
+  roleLabel.append(roleSelect);
+
+  const formLabel = document.createElement('label');
+  formLabel.textContent = 'Form Factor';
+  const formSelect = document.createElement('select');
+  formSelect.className = 'tsla-select';
+  formSelect.append(option('iOS Device', String(KeyFormFactor.KEY_FORM_FACTOR_IOS_DEVICE)));
+  formSelect.append(option('Android Device', String(KeyFormFactor.KEY_FORM_FACTOR_ANDROID_DEVICE)));
+  formSelect.append(option('NFC Card', String(KeyFormFactor.KEY_FORM_FACTOR_NFC_CARD)));
+  formLabel.append(formSelect);
+
+  const enrollBtn = createButton('Enroll Key');
+  enrollRow.append(roleLabel, formLabel, enrollBtn.button);
+
   const stateRow = document.createElement('div');
   stateRow.className = 'tsla-row';
   const stateLabel = document.createElement('label');
@@ -80,6 +103,7 @@ export function initializeApp(root: HTMLElement): void {
     publicKeyOutput.wrapper,
     profileButtonsRow,
     buttonsRow,
+    enrollRow,
     stateRow,
     logOutput,
   );
@@ -265,6 +289,33 @@ export function initializeApp(root: HTMLElement): void {
     }
   });
 
+  enrollBtn.button.addEventListener('click', async () => {
+    try {
+      if (!session) {
+        throw new Error('Select a vehicle first');
+      }
+      // Prefer explicit public key from textarea; else derive from private key.
+      let publicKeyRaw: Uint8Array | null = null;
+      const pubHex = publicKeyOutput.textarea.value.trim();
+      if (pubHex) {
+        publicKeyRaw = hexToBytes(pubHex);
+      } else if (privateKey) {
+        publicKeyRaw = await exportPublicKeyFromPrivate(privateKey);
+      }
+      if (!publicKeyRaw || publicKeyRaw.length === 0) {
+        throw new Error('No public key available. Generate/import a key first.');
+      }
+      const role = parseInt(roleSelect.value, 10);
+      const formFactor = parseInt(formSelect.value, 10);
+      appendLog(logOutput, 'Sending add-key request over BLE…');
+      await session.sendAddKeyRequest({ publicKeyRaw, role, formFactor });
+      appendLog(logOutput, 'Request sent. Tap your NFC card on the console and confirm on the vehicle UI to approve.');
+      appendLog(logOutput, 'After approval, click Connect to verify session can be established.');
+    } catch (error) {
+      reportError(logOutput, error, 'Failed to enroll key');
+    }
+  });
+
   privateKeyInput.textarea.addEventListener('input', () => {
     privateKey = null;
   });
@@ -347,6 +398,25 @@ function renderState(log: HTMLElement, result: VehicleStateResult): void {
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.replace(/\s+/g, '');
+  if (clean.length % 2 !== 0) {
+    throw new Error('Invalid hex string length');
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+function option(label: string, value: string) {
+  const o = document.createElement('option');
+  o.value = value;
+  o.textContent = label;
+  return o;
 }
 
 function loadStoredProfiles(): StoredProfile[] {
