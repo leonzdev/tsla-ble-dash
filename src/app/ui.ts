@@ -1,4 +1,9 @@
-import { TeslaBleSession, VehicleStateResult } from '../lib/session';
+import {
+  TeslaBleSession,
+  VehicleStateResult,
+  DeviceDiscoveryMode,
+  SelectedDeviceInfo,
+} from '../lib/session';
 import { StateCategory, KeyRole, KeyFormFactor } from '../lib/protocol';
 import {
   generatePrivateKey,
@@ -23,6 +28,14 @@ export function initializeApp(root: HTMLElement): void {
   const profileNameInput = createInput('Profile Name', 'text');
   const vinInput = createInput('VIN', 'text');
   vinInput.input.placeholder = '5YJ3E1EA7JF000000';
+
+  const discoveryModeSelect = createSelect('Device Discovery Mode');
+  discoveryModeSelect.select.append(
+    option('VIN prefix filter in prompt', DeviceDiscoveryMode.VinPrefixPromptFilter),
+    option('VIN prefix validation after selection (default)', DeviceDiscoveryMode.VinPrefixValidation),
+    option('No VIN prefix checks', DeviceDiscoveryMode.Unfiltered),
+  );
+  discoveryModeSelect.select.value = DeviceDiscoveryMode.VinPrefixValidation;
 
   const privateKeyInput = createTextarea('Private key (PEM)');
   privateKeyInput.textarea.placeholder = 'Paste PKCS#8 private key generated via tesla-keygen…';
@@ -102,6 +115,7 @@ export function initializeApp(root: HTMLElement): void {
     profileSelect.wrapper,
     profileNameInput.wrapper,
     vinInput.wrapper,
+    discoveryModeSelect.wrapper,
     privateKeyInput.wrapper,
     publicKeyOutput.wrapper,
     profileButtonsRow,
@@ -256,9 +270,16 @@ export function initializeApp(root: HTMLElement): void {
       if (!vin) {
         throw new Error('VIN is required');
       }
-      session = new TeslaBleSession({ vin });
+      const discoveryMode = parseDiscoveryMode(discoveryModeSelect.select.value);
+      session = new TeslaBleSession({ vin, deviceDiscoveryMode: discoveryMode });
       await session.connect();
       appendLog(logOutput, 'Bluetooth device selected and GATT connected.');
+      const deviceInfo = session.getSelectedDeviceInfo();
+      if (deviceInfo) {
+        appendLog(logOutput, `Selected device info: ${formatDeviceInfo(deviceInfo)}.`);
+      } else {
+        appendLog(logOutput, 'Selected device info: unavailable (no Bluetooth device reference).');
+      }
     } catch (error) {
       reportError(logOutput, error, 'Failed to select device');
       if (error instanceof Error && /VIN beacon prefix/.test(error.message)) {
@@ -451,11 +472,39 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
+function formatDeviceInfo(info: SelectedDeviceInfo): string {
+  const uuidList = info.uuids && info.uuids.length
+    ? info.uuids
+        .map((uuid) => (typeof uuid === 'number' ? `0x${uuid.toString(16)}` : String(uuid)))
+        .join(', ')
+    : '(none)';
+  const parts = [
+    `name=${info.name ?? '(none)'}`,
+    `id=${info.id}`,
+    `uuids=${uuidList}`,
+    `gattConnected=${info.gattConnected}`,
+    `watchAdvertisementsSupported=${info.watchAdvertisementsSupported}`,
+  ];
+  return parts.join(', ');
+}
+
 function option(label: string, value: string) {
   const o = document.createElement('option');
   o.value = value;
   o.textContent = label;
   return o;
+}
+
+function parseDiscoveryMode(value: string): DeviceDiscoveryMode {
+  switch (value) {
+    case DeviceDiscoveryMode.VinPrefixPromptFilter:
+    case DeviceDiscoveryMode.VinPrefixValidation:
+    case DeviceDiscoveryMode.Unfiltered:
+      return value;
+    default:
+      console.warn('Unknown discovery mode value, defaulting to VIN prefix validation.', value);
+      return DeviceDiscoveryMode.VinPrefixValidation;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

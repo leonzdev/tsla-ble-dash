@@ -21,7 +21,9 @@ import {
   MESSAGE_EVENT,
   DISCONNECT_EVENT,
   TransportMessageEvent,
+  DeviceDiscoveryMode,
 } from './bluetooth';
+export { DeviceDiscoveryMode } from './bluetooth';
 import {
   randomBytes,
   deriveSessionKeys,
@@ -75,6 +77,7 @@ export interface TeslaBleSessionOptions {
   transport?: TeslaBleTransport;
   domain?: UniversalDomain;
   flags?: number;
+  deviceDiscoveryMode?: DeviceDiscoveryMode;
 }
 
 export interface VehicleStateResult {
@@ -82,6 +85,14 @@ export interface VehicleStateResult {
   rawResponse: Uint8Array;
   response: any;
   vehicleData: any;
+}
+
+export interface SelectedDeviceInfo {
+  name: string | null;
+  id: string;
+  uuids: BluetoothServiceUUID[] | undefined;
+  gattConnected: boolean;
+  watchAdvertisementsSupported: boolean;
 }
 
 const textEncoder = new TextEncoder();
@@ -101,7 +112,11 @@ export class TeslaBleSession {
     this.vin = options.vin;
     this.domain = options.domain ?? DOMAIN_INFOTAINMENT;
     this.flags = options.flags ?? DEFAULT_REQUEST_FLAGS;
-    this.transport = options.transport ?? new TeslaBleTransport({ vin: options.vin });
+    this.transport = options.transport
+      ?? new TeslaBleTransport({
+        vin: options.vin,
+        deviceDiscoveryMode: options.deviceDiscoveryMode,
+      });
     this.routingAddress = randomBytes(16);
   }
 
@@ -131,6 +146,21 @@ export class TeslaBleSession {
     const formFactor = params.formFactor ?? KeyFormFactor.KEY_FORM_FACTOR_IOS_DEVICE;
     const payload = encodeVcsecAddKeyRequest({ publicKeyRaw: params.publicKeyRaw, role, formFactor });
     await this.transport.send(payload);
+  }
+
+  getSelectedDeviceInfo(): SelectedDeviceInfo | null {
+    const device = this.transport.bluetoothDevice;
+    if (!device) {
+      return null;
+    }
+    const deviceWithUuids = device as BluetoothDevice & { uuids?: BluetoothServiceUUID[] };
+    return {
+      name: device.name ?? null,
+      id: device.id,
+      uuids: deviceWithUuids.uuids,
+      gattConnected: device.gatt?.connected ?? false,
+      watchAdvertisementsSupported: typeof device.watchAdvertisements === 'function',
+    } satisfies SelectedDeviceInfo;
   }
 
   async ensureSession(privateKey: CryptoKey): Promise<void> {
