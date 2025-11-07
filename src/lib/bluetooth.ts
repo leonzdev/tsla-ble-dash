@@ -13,10 +13,17 @@ export type TransportMessageEvent = CustomEvent<Uint8Array>;
 export interface TeslaBleTransportOptions {
   vin?: string;
   preferredBlockLength?: number;
+  deviceDiscoveryMode?: DeviceDiscoveryMode;
 }
 
 export const MESSAGE_EVENT = 'message';
 export const DISCONNECT_EVENT = 'disconnect';
+
+export enum DeviceDiscoveryMode {
+  VinPrefixPromptFilter = 'vin-prefix-prompt-filter',
+  VinPrefixValidation = 'vin-prefix-validation',
+  Unfiltered = 'unfiltered',
+}
 
 export class TeslaBleTransport extends EventTarget {
   private device: BluetoothDevice | null = null;
@@ -40,19 +47,36 @@ export class TeslaBleTransport extends EventTarget {
   }
 
   async requestDevice(): Promise<BluetoothDevice> {
-    const options: RequestDeviceOptions = {
-      acceptAllDevices: true,
-      optionalServices: [TESLA_SERVICE_UUID],
-    } as RequestDeviceOptions;
+    const optionalServices: BluetoothServiceUUID[] = [TESLA_SERVICE_UUID];
+    const mode = this.options.deviceDiscoveryMode ?? DeviceDiscoveryMode.VinPrefixValidation;
+    const expectedPrefix = this.options.vin ? await this.vinToLocalName(this.options.vin) : null;
 
-    const device = await navigator.bluetooth.requestDevice(options);
-    if (this.options.vin) {
-      const expectedPrefix = await this.vinToLocalName(this.options.vin);
-      if (device.name && expectedPrefix && !device.name.startsWith(expectedPrefix)) {
-        const msg = `Selected device name "${device.name}" does not match expected VIN beacon prefix ${expectedPrefix}. Please select a different device.`;
-        console.warn(msg);
-        throw new Error(msg);
-      }
+    let requestOptions: RequestDeviceOptions;
+    if (mode === DeviceDiscoveryMode.VinPrefixPromptFilter && expectedPrefix) {
+      requestOptions = {
+        filters: [{ namePrefix: expectedPrefix }],
+        optionalServices,
+      };
+    } else {
+      requestOptions = {
+        acceptAllDevices: true,
+        optionalServices,
+      };
+    }
+
+    const device = await navigator.bluetooth.requestDevice(requestOptions);
+    if (
+      mode === DeviceDiscoveryMode.VinPrefixValidation &&
+      expectedPrefix &&
+      device.name &&
+      !device.name.startsWith(expectedPrefix)
+    ) {
+      const msg = `Selected device name "${device.name}" does not match expected VIN beacon prefix ${expectedPrefix}. Please select a different device.`;
+      console.warn(msg);
+      throw new Error(msg);
+    }
+    if (mode === DeviceDiscoveryMode.VinPrefixValidation && expectedPrefix && !device.name) {
+      console.warn('Selected device is missing a name; unable to verify VIN prefix.');
     }
     return device;
   }
