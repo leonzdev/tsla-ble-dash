@@ -30,9 +30,9 @@ Open the dev server in a Chromium-based browser that supports Web Bluetooth (e.g
 ## Using the demo UI
 
 1. **Generate or import a key**
-   - Use the `Generate Key` button to create a P-256 ECDH key pair in the browser. The private key (PKCS#8 PEM) is shown so you can back it up.
-   - The public key is emitted as a hex string. You must enroll this public key with your vehicle (e.g. `tesla-control add-key-request`) and approve it via NFC before any commands will succeed.
-   - Alternatively, paste an existing PKCS#8 private key exported by `tesla-keygen` into the textarea.
+   - Use the `Generate Key` button to create a P-256 ECDH key pair in the browser. The private key (SEC1 `EC PRIVATE KEY` PEM) matches the output of tools such as `openssl ecparam -genkey -name prime256v1 -noout`.
+   - The public key is emitted as a PEM block (`PUBLIC KEY`), matching the format produced by `tesla-keygen`. You can enroll it directly from the dashboard via **Enroll Key**, or with external tooling (e.g. `tesla-control add-key-request`) before approving it over NFC.
+   - Alternatively, paste an existing SEC1 `EC PRIVATE KEY` generated via `openssl` or exported by `tesla-keygen` into the textarea.
 2. **Select a vehicle**
    - Enter your VIN and click `Select Vehicle`. A Web Bluetooth picker appears. Choose the entry whose local name matches the Tesla BLE pattern (`SXXXXXXXXXXXXXXXC`).
 3. **Establish a session**
