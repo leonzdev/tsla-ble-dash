@@ -472,6 +472,25 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
+function formatDeviceId(id: string): string {
+  try {
+    const normalized = id.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const binary = atob(padded);
+    if (!binary) {
+      return id;
+    }
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
+  } catch (error) {
+    console.warn('Failed to decode device id as base64, leaving as-is.', error);
+    return id;
+  }
+}
+
 function formatDeviceInfo(info: SelectedDeviceInfo): string {
   const uuidList = info.uuids && info.uuids.length
     ? info.uuids
@@ -480,7 +499,7 @@ function formatDeviceInfo(info: SelectedDeviceInfo): string {
     : '(none)';
   const parts = [
     `name=${info.name ?? '(none)'}`,
-    `id=${info.id}`,
+    `id=${formatDeviceId(info.id)}`,
     `uuids=${uuidList}`,
     `gattConnected=${info.gattConnected}`,
     `watchAdvertisementsSupported=${info.watchAdvertisementsSupported}`,
