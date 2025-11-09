@@ -7,9 +7,13 @@ import {
 import { StateCategory, KeyRole, KeyFormFactor } from '../lib/protocol';
 import {
   generatePrivateKey,
-  importPrivateKeyPkcs8,
-  exportPrivateKeyPkcs8,
+  importPrivateKeyPem,
+  exportPrivateKeyPem,
   exportPublicKeyFromPrivate,
+  exportPublicKeyPem,
+  exportPublicKeyPemFromPrivate,
+  publicKeyPemToRaw,
+  publicKeyRawToPem,
 } from '../lib/crypto';
 
 const PROFILE_STORAGE_KEY = 'tsla.profiles';
@@ -18,10 +22,10 @@ interface StoredProfile {
   id: string;
   name: string;
   privateKeyPem: string;
-  publicKeyHex: string;
+  publicKeyPem: string;
 }
 
-export function initializeApp(root: HTMLElement): void {
+export async function initializeApp(root: HTMLElement): Promise<void> {
   root.classList.add('tsla-app');
 
   const profileSelect = createSelect('Profile');
@@ -38,12 +42,12 @@ export function initializeApp(root: HTMLElement): void {
   discoveryModeSelect.select.value = DeviceDiscoveryMode.VinPrefixValidation;
 
   const privateKeyInput = createTextarea('Private key (PEM)');
-  privateKeyInput.textarea.placeholder = 'Paste PKCS#8 private key generated via tesla-keygen…';
+  privateKeyInput.textarea.placeholder = 'Paste EC PRIVATE KEY generated via tesla-keygen…';
   privateKeyInput.textarea.rows = 6;
 
-  const publicKeyOutput = createTextarea('Public key (hex, share with vehicle)');
+  const publicKeyOutput = createTextarea('Public key (PEM, share with vehicle)');
   publicKeyOutput.textarea.readOnly = true;
-  publicKeyOutput.textarea.rows = 3;
+  publicKeyOutput.textarea.rows = 6;
 
   const stateSelect = document.createElement('select');
   stateSelect.className = 'tsla-select';
@@ -127,7 +131,7 @@ export function initializeApp(root: HTMLElement): void {
 
   let session: TeslaBleSession | null = null;
   let privateKey: CryptoKey | null = null;
-  let profiles = loadStoredProfiles();
+  let profiles = await loadStoredProfiles();
 
   refreshProfileOptions(profileSelect.select, profiles, null);
   updateProfileButtons();
@@ -137,10 +141,10 @@ export function initializeApp(root: HTMLElement): void {
       appendLog(logOutput, 'Generating new private key…');
       const keyPair = await generatePrivateKey();
       privateKey = keyPair.privateKey;
-      const pem = await exportPrivateKeyPkcs8(privateKey);
+      const pem = await exportPrivateKeyPem(privateKey);
       privateKeyInput.textarea.value = pem;
-      const publicKey = await exportPublicKeyFromPrivate(privateKey);
-      publicKeyOutput.textarea.value = bytesToHex(publicKey);
+      const publicKeyPem = await exportPublicKeyPem(keyPair.publicKey);
+      publicKeyOutput.textarea.value = publicKeyPem;
       profileSelect.select.value = '';
       profileNameInput.input.value = '';
       updateProfileButtons();
@@ -168,15 +172,14 @@ export function initializeApp(root: HTMLElement): void {
     }
     profileNameInput.input.value = profile.name;
     privateKeyInput.textarea.value = profile.privateKeyPem;
-    publicKeyOutput.textarea.value = profile.publicKeyHex;
+    publicKeyOutput.textarea.value = profile.publicKeyPem;
     try {
-      const importedKey = await importPrivateKeyPkcs8(profile.privateKeyPem);
+      const importedKey = await importPrivateKeyPem(profile.privateKeyPem);
       privateKey = importedKey;
-      const derivedPublicKey = await exportPublicKeyFromPrivate(importedKey);
-      const derivedPublicKeyHex = bytesToHex(derivedPublicKey);
-      if (derivedPublicKeyHex !== profile.publicKeyHex) {
-        profile.publicKeyHex = derivedPublicKeyHex;
-        publicKeyOutput.textarea.value = derivedPublicKeyHex;
+      const derivedPublicKeyPem = await exportPublicKeyPemFromPrivate(importedKey);
+      if (!pemEquals(derivedPublicKeyPem, profile.publicKeyPem)) {
+        profile.publicKeyPem = derivedPublicKeyPem;
+        publicKeyOutput.textarea.value = derivedPublicKeyPem;
         persistProfiles(profiles);
         appendLog(logOutput, `Profile "${profile.name}" public key refreshed.`);
       } else {
@@ -228,11 +231,10 @@ export function initializeApp(root: HTMLElement): void {
       if (!pem) {
         throw new Error('Provide a private key before saving');
       }
-      const importedKey = await importPrivateKeyPkcs8(pem);
+      const importedKey = await importPrivateKeyPem(pem);
       privateKey = importedKey;
-      const publicKey = await exportPublicKeyFromPrivate(importedKey);
-      const publicKeyHex = bytesToHex(publicKey);
-      publicKeyOutput.textarea.value = publicKeyHex;
+      const publicKeyPem = await exportPublicKeyPemFromPrivate(importedKey);
+      publicKeyOutput.textarea.value = publicKeyPem;
 
       const selectedId = profileSelect.select.value;
       let savedProfileId = selectedId;
@@ -240,14 +242,14 @@ export function initializeApp(root: HTMLElement): void {
       if (existingProfile) {
         existingProfile.name = name;
         existingProfile.privateKeyPem = pem;
-        existingProfile.publicKeyHex = publicKeyHex;
+        existingProfile.publicKeyPem = publicKeyPem;
         appendLog(logOutput, `Updated profile "${name}".`);
       } else {
         const newProfile: StoredProfile = {
           id: createProfileId(),
           name,
           privateKeyPem: pem,
-          publicKeyHex,
+          publicKeyPem,
         };
         profiles = [...profiles, newProfile];
         savedProfileId = newProfile.id;
@@ -323,9 +325,9 @@ export function initializeApp(root: HTMLElement): void {
       }
       // Prefer explicit public key from textarea; else derive from private key.
       let publicKeyRaw: Uint8Array | null = null;
-      const pubHex = publicKeyOutput.textarea.value.trim();
-      if (pubHex) {
-        publicKeyRaw = hexToBytes(pubHex);
+      const publicKeyText = publicKeyOutput.textarea.value.trim();
+      if (publicKeyText) {
+        publicKeyRaw = await parsePublicKeyInput(publicKeyText);
       } else if (privateKey) {
         publicKeyRaw = await exportPublicKeyFromPrivate(privateKey);
       }
@@ -438,7 +440,7 @@ async function ensurePrivateKey(text: string, cached: CryptoKey | null): Promise
   if (!text) {
     throw new Error('Provide a private key first');
   }
-  return importPrivateKeyPkcs8(text);
+  return importPrivateKeyPem(text);
 }
 
 function appendLog(target: HTMLElement, message: string): void {
@@ -456,8 +458,23 @@ function renderState(log: HTMLElement, result: VehicleStateResult): void {
   appendLog(log, `State result:\n${JSON.stringify(result.vehicleData, null, 2)}`);
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+function normalizePem(value: string): string {
+  return value.trim().replace(/\r\n/g, '\n');
+}
+
+function pemEquals(a: string, b: string): boolean {
+  return normalizePem(a) === normalizePem(b);
+}
+
+async function parsePublicKeyInput(text: string): Promise<Uint8Array> {
+  if (/-----BEGIN [^-]+-----/.test(text)) {
+    return publicKeyPemToRaw(text);
+  }
+  const clean = text.replace(/\s+/g, '');
+  if (/^[0-9a-fA-F]+$/.test(clean) && clean.length > 0) {
+    return hexToBytes(clean);
+  }
+  throw new Error('Public key must be provided as PEM or hexadecimal.');
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -530,7 +547,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function loadStoredProfiles(): StoredProfile[] {
+async function loadStoredProfiles(): Promise<StoredProfile[]> {
   const storage = getLocalStorage();
   if (!storage) {
     return [];
@@ -544,26 +561,48 @@ function loadStoredProfiles(): StoredProfile[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed
-      .map((item) => {
-        if (
-          typeof item === 'object' &&
-          item !== null &&
-          typeof item.id === 'string' &&
-          typeof item.name === 'string' &&
-          typeof item.privateKeyPem === 'string' &&
-          typeof item.publicKeyHex === 'string'
-        ) {
-          return {
-            id: item.id,
-            name: item.name,
-            privateKeyPem: item.privateKeyPem,
-            publicKeyHex: item.publicKeyHex,
-          } satisfies StoredProfile;
+    const results: StoredProfile[] = [];
+    let mutated = false;
+    for (const item of parsed) {
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        typeof item.privateKeyPem === 'string'
+      ) {
+        let publicKeyPem = typeof item.publicKeyPem === 'string' ? item.publicKeyPem : null;
+        if (!publicKeyPem && typeof item.publicKeyHex === 'string') {
+          try {
+            const rawKey = hexToBytes(item.publicKeyHex);
+            publicKeyPem = await publicKeyRawToPem(rawKey);
+            mutated = true;
+          } catch (error) {
+            console.warn('Failed to convert stored public key hex to PEM', error);
+          }
         }
-        return null;
-      })
-      .filter((item): item is StoredProfile => item !== null);
+        if (!publicKeyPem) {
+          try {
+            const imported = await importPrivateKeyPem(item.privateKeyPem);
+            publicKeyPem = await exportPublicKeyPemFromPrivate(imported);
+            mutated = true;
+          } catch (error) {
+            console.warn('Failed to derive public key PEM from private key', error);
+            continue;
+          }
+        }
+        results.push({
+          id: item.id,
+          name: item.name,
+          privateKeyPem: item.privateKeyPem,
+          publicKeyPem,
+        });
+      }
+    }
+    if (mutated) {
+      persistProfiles(results);
+    }
+    return results;
   } catch (error) {
     console.warn('Failed to parse stored profiles', error);
     return [];
