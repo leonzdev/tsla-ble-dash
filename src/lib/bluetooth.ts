@@ -8,6 +8,8 @@ import {
   WEB_BLUETOOTH_DEFAULT_BLOCK,
 } from './constants';
 
+const MIN_BLOCK_LENGTH = 20; // 23 (ATT default MTU) - 3 byte length header
+
 export type TransportMessageEvent = CustomEvent<Uint8Array>;
 
 export interface TeslaBleTransportOptions {
@@ -33,6 +35,7 @@ export class TeslaBleTransport extends EventTarget {
   private buffer: Uint8Array = new Uint8Array(0);
   private lastNotification = 0;
   private blockLength = WEB_BLUETOOTH_DEFAULT_BLOCK;
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: TeslaBleTransportOptions = {}) {
     super();
@@ -97,7 +100,7 @@ export class TeslaBleTransport extends EventTarget {
     this.rxChar = await service.getCharacteristic(TESLA_RX_CHAR_UUID);
 
     // Compute conservative block length based on characteristic properties.
-    this.blockLength = Math.max(20, this.options.preferredBlockLength ?? WEB_BLUETOOTH_DEFAULT_BLOCK);
+    this.blockLength = Math.max(MIN_BLOCK_LENGTH, this.options.preferredBlockLength ?? WEB_BLUETOOTH_DEFAULT_BLOCK);
 
     await this.rxChar.startNotifications();
     this.rxChar.addEventListener('characteristicvaluechanged', (event) => {
@@ -136,16 +139,9 @@ export class TeslaBleTransport extends EventTarget {
     packet[1] = payload.length & 0xff;
     packet.set(payload, HEADER_SIZE);
 
-    for (let offset = 0; offset < packet.length; offset += this.blockLength) {
-      const block = packet.subarray(offset, Math.min(offset + this.blockLength, packet.length));
-      if (typeof this.txChar.writeValueWithResponse === 'function') {
-        await this.txChar.writeValueWithResponse(block);
-      } else if (typeof this.txChar.writeValueWithoutResponse === 'function') {
-        await this.txChar.writeValueWithoutResponse(block);
-      } else {
-        await (this.txChar as any).writeValue(block);
-      }
-    }
+    const task = this.writeChain.then(() => this.writePacket(packet));
+    this.writeChain = task.catch(() => { /* swallow to keep chain alive */ });
+    await task;
   }
 
   addMessageListener(listener: (event: TransportMessageEvent) => void): void {
@@ -194,6 +190,53 @@ export class TeslaBleTransport extends EventTarget {
       const event = new CustomEvent<Uint8Array>(MESSAGE_EVENT, { detail: message });
       this.dispatchEvent(event);
     }
+  }
+
+  private async writePacket(packet: Uint8Array): Promise<void> {
+    while (true) {
+      try {
+        await this.writePacketOnce(packet);
+        return;
+      } catch (error) {
+        if (!this.handleWriteError(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private async writePacketOnce(packet: Uint8Array): Promise<void> {
+    if (!this.txChar) {
+      throw new Error('TX characteristic not ready');
+    }
+    for (let offset = 0; offset < packet.length; offset += this.blockLength) {
+      const block = packet.subarray(offset, Math.min(offset + this.blockLength, packet.length));
+      const chunk = block as unknown as BufferSource;
+      if (typeof this.txChar.writeValueWithResponse === 'function') {
+        await this.txChar.writeValueWithResponse(chunk);
+      } else if (typeof this.txChar.writeValueWithoutResponse === 'function') {
+        await this.txChar.writeValueWithoutResponse(chunk);
+      } else {
+        await (this.txChar as any).writeValue(chunk);
+      }
+    }
+  }
+
+  private handleWriteError(error: unknown): boolean {
+    if (!(error instanceof DOMException)) {
+      return false;
+    }
+    if (error.name !== 'DataError') {
+      return false;
+    }
+    if (this.blockLength <= MIN_BLOCK_LENGTH) {
+      return false;
+    }
+    console.warn(
+      `BLE write failed with DataError using block length ${this.blockLength}; falling back to ${MIN_BLOCK_LENGTH}`,
+    );
+    this.blockLength = MIN_BLOCK_LENGTH;
+    return true;
   }
 
   private async vinToLocalName(vin: string): Promise<string> {
