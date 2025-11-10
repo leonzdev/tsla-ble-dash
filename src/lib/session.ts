@@ -300,15 +300,14 @@ export class TeslaBleSession {
     const ciphertext = new Uint8Array(message.protobufMessageAsBytes ?? new Uint8Array());
     const combined = concat(ciphertext, tag);
 
+    const flags = message.flags ?? 0;
     const metadataItems = [
       { tag: TAG_SIGNATURE_TYPE, value: new Uint8Array([SIGNATURE_TYPE_AES_GCM_RESPONSE]) },
       { tag: TAG_DOMAIN, value: new Uint8Array([message.fromDestination?.domain ?? this.domain]) },
       { tag: TAG_PERSONALIZATION, value: textEncoder.encode(this.vin) },
       { tag: TAG_COUNTER, value: uint32ToBytes(counter) },
     ];
-    if ((message.flags ?? 0) !== 0) {
-      metadataItems.push({ tag: TAG_FLAGS, value: uint32ToBytes(message.flags) });
-    }
+    metadataItems.push({ tag: TAG_FLAGS, value: uint32ToBytes(flags) });
     metadataItems.push({ tag: TAG_REQUEST_HASH, value: requestId });
     const faultCode = message.signedMessageStatus?.signedMessageFault ?? 0;
     metadataItems.push({ tag: TAG_FAULT, value: uint32ToBytes(faultCode) });
