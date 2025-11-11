@@ -73,7 +73,7 @@ interface DomainSessionState {
 }
 
 export interface TeslaBleSessionOptions {
-  vin: string;
+  vin?: string;
   transport?: TeslaBleTransport;
   domain?: UniversalDomain;
   flags?: number;
@@ -99,7 +99,7 @@ const textEncoder = new TextEncoder();
 
 export class TeslaBleSession {
   private readonly transport: TeslaBleTransport;
-  private readonly vin: string;
+  private readonly vin: string | null;
   private readonly domain: UniversalDomain;
   private readonly flags: number;
   private readonly routingAddress: Uint8Array;
@@ -109,12 +109,12 @@ export class TeslaBleSession {
   private connected = false;
 
   constructor(options: TeslaBleSessionOptions) {
-    this.vin = options.vin;
+    this.vin = options.vin?.trim() ? options.vin.trim() : null;
     this.domain = options.domain ?? DOMAIN_INFOTAINMENT;
     this.flags = options.flags ?? DEFAULT_REQUEST_FLAGS;
     this.transport = options.transport
       ?? new TeslaBleTransport({
-        vin: options.vin,
+        vin: this.vin ?? undefined,
         deviceDiscoveryMode: options.deviceDiscoveryMode,
       });
     this.routingAddress = randomBytes(16);
@@ -207,9 +207,10 @@ export class TeslaBleSession {
     const tag = extractSessionInfoTag(message);
     const keys = await deriveSessionKeys({ privateKey, peerPublicKey: sessionInfo.publicKey });
 
+    const personalization = this.encodeVin();
     const metadata = serializeMetadata([
       { tag: TAG_SIGNATURE_TYPE, value: new Uint8Array([SIGNATURE_TYPE_HMAC]) },
-      { tag: TAG_PERSONALIZATION, value: textEncoder.encode(this.vin) },
+      { tag: TAG_PERSONALIZATION, value: personalization },
       { tag: TAG_CHALLENGE, value: uuid },
     ]);
     if (!(await verifyHmacSha256(keys.sessionInfoKey, concat(metadata, sessionInfoBytes), tag))) {
@@ -237,10 +238,11 @@ export class TeslaBleSession {
     const vehicleNow = this.vehicleTimeSeconds();
     const expires = defaultExpiry(vehicleNow);
 
+    const personalization = this.encodeVin();
     const metadataItems = [
       { tag: TAG_SIGNATURE_TYPE, value: new Uint8Array([SIGNATURE_TYPE_AES_GCM_PERSONALIZED]) },
       { tag: TAG_DOMAIN, value: new Uint8Array([this.domain]) },
-      { tag: TAG_PERSONALIZATION, value: textEncoder.encode(this.vin) },
+      { tag: TAG_PERSONALIZATION, value: personalization },
       { tag: TAG_EPOCH, value: session.epoch },
       { tag: TAG_EXPIRES_AT, value: uint32ToBytes(expires) },
       { tag: TAG_COUNTER, value: uint32ToBytes(counter) },
@@ -301,10 +303,11 @@ export class TeslaBleSession {
     const combined = concat(ciphertext, tag);
 
     const flags = message.flags ?? 0;
+    const personalization = this.encodeVin();
     const metadataItems = [
       { tag: TAG_SIGNATURE_TYPE, value: new Uint8Array([SIGNATURE_TYPE_AES_GCM_RESPONSE]) },
       { tag: TAG_DOMAIN, value: new Uint8Array([message.fromDestination?.domain ?? this.domain]) },
-      { tag: TAG_PERSONALIZATION, value: textEncoder.encode(this.vin) },
+      { tag: TAG_PERSONALIZATION, value: personalization },
       { tag: TAG_COUNTER, value: uint32ToBytes(counter) },
     ];
     metadataItems.push({ tag: TAG_FLAGS, value: uint32ToBytes(flags) });
@@ -388,6 +391,13 @@ export class TeslaBleSession {
     this.connected = false;
     this.failPending(new Error('BLE disconnected'));
   };
+
+  private encodeVin(): Uint8Array | null {
+    if (!this.vin) {
+      return null;
+    }
+    return textEncoder.encode(this.vin);
+  }
 
   private vehicleTimeSeconds(): number {
     if (!this.sessionState) {

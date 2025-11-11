@@ -36,10 +36,13 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   const discoveryModeSelect = createSelect('Device Discovery Mode');
   discoveryModeSelect.select.append(
     option('VIN prefix filter in prompt', DeviceDiscoveryMode.VinPrefixPromptFilter),
-    option('VIN prefix validation after selection (default)', DeviceDiscoveryMode.VinPrefixValidation),
-    option('No VIN prefix checks', DeviceDiscoveryMode.Unfiltered),
+    option('VIN prefix validation after selection', DeviceDiscoveryMode.VinPrefixValidation),
+    option('No VIN prefix checks (default)', DeviceDiscoveryMode.Unfiltered),
   );
-  discoveryModeSelect.select.value = DeviceDiscoveryMode.VinPrefixValidation;
+  discoveryModeSelect.select.value = DeviceDiscoveryMode.Unfiltered;
+  discoveryModeSelect.select.addEventListener('change', () => {
+    updateVinFieldVisibility();
+  });
 
   const privateKeyInput = createTextarea('Private key (PEM)');
   privateKeyInput.textarea.placeholder = 'Paste EC PRIVATE KEY generated via tesla-keygen…';
@@ -128,6 +131,8 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     stateRow,
     logOutput,
   );
+
+  updateVinFieldVisibility();
 
   let session: TeslaBleSession | null = null;
   let privateKey: CryptoKey | null = null;
@@ -268,12 +273,15 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   selectDeviceBtn.button.addEventListener('click', async () => {
     try {
-      const vin = vinInput.input.value.trim();
-      if (!vin) {
-        throw new Error('VIN is required');
-      }
       const discoveryMode = parseDiscoveryMode(discoveryModeSelect.select.value);
-      session = new TeslaBleSession({ vin, deviceDiscoveryMode: discoveryMode });
+      const vin = vinInput.input.value.trim();
+      if (requiresVinForDiscovery(discoveryMode) && !vin) {
+        throw new Error('VIN is required for the selected discovery mode');
+      }
+      session = new TeslaBleSession({
+        vin: vin || undefined,
+        deviceDiscoveryMode: discoveryMode,
+      });
       await session.connect();
       appendLog(logOutput, 'Bluetooth device selected and GATT connected.');
       const deviceInfo = session.getSelectedDeviceInfo();
@@ -387,6 +395,16 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       profileSelect.select.value && profiles.some((item) => item.id === profileSelect.select.value),
     );
     deleteProfileBtn.button.disabled = !hasSelection;
+  }
+
+  function updateVinFieldVisibility() {
+    const mode = parseDiscoveryMode(discoveryModeSelect.select.value);
+    const needsVin = requiresVinForDiscovery(mode);
+    vinInput.wrapper.style.display = needsVin ? '' : 'none';
+  }
+
+  function requiresVinForDiscovery(mode: DeviceDiscoveryMode): boolean {
+    return mode !== DeviceDiscoveryMode.Unfiltered;
   }
 }
 
