@@ -52,20 +52,24 @@ export class TeslaBleTransport extends EventTarget {
   }
 
   async requestDevice(): Promise<BluetoothDevice> {
-    const optionalServices: BluetoothServiceUUID[] = [TESLA_SERVICE_UUID];
+    const services: BluetoothServiceUUID[] = [TESLA_SERVICE_UUID];
     const mode = this.options.deviceDiscoveryMode ?? DeviceDiscoveryMode.VinPrefixValidation;
     const expectedPrefix = this.options.vin ? await this.vinToLocalName(this.options.vin) : null;
 
     let requestOptions: RequestDeviceOptions;
     if (mode === DeviceDiscoveryMode.VinPrefixPromptFilter && expectedPrefix) {
       requestOptions = {
-        filters: [{ namePrefix: expectedPrefix }],
-        optionalServices,
+        filters: [{ 
+          namePrefix: expectedPrefix,         
+          services,
+        }],
       };
     } else {
       requestOptions = {
-        acceptAllDevices: true,
-        optionalServices,
+        // acceptAllDevices: true,
+        filters: [{
+          services
+        }],
       };
     }
 
