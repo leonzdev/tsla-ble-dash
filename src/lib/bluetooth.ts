@@ -9,6 +9,7 @@ import {
 } from './constants';
 
 const MIN_BLOCK_LENGTH = 20; // 23 (ATT default MTU) - 3 byte length header
+type WriteMode = 'with-response' | 'without-response';
 
 export type TransportMessageEvent = CustomEvent<Uint8Array>;
 
@@ -36,6 +37,7 @@ export class TeslaBleTransport extends EventTarget {
   private lastNotification = 0;
   private blockLength = WEB_BLUETOOTH_DEFAULT_BLOCK;
   private writeChain: Promise<void> = Promise.resolve();
+  private writeMode: WriteMode = 'with-response';
 
   constructor(private readonly options: TeslaBleTransportOptions = {}) {
     super();
@@ -98,12 +100,13 @@ export class TeslaBleTransport extends EventTarget {
     const service = await this.server.getPrimaryService(TESLA_SERVICE_UUID);
     this.txChar = await service.getCharacteristic(TESLA_TX_CHAR_UUID);
     this.rxChar = await service.getCharacteristic(TESLA_RX_CHAR_UUID);
+    this.writeMode = this.determineWriteMode();
 
     // Compute conservative block length based on characteristic properties.
     this.blockLength = Math.max(MIN_BLOCK_LENGTH, this.options.preferredBlockLength ?? WEB_BLUETOOTH_DEFAULT_BLOCK);
 
     await this.rxChar.startNotifications();
-    this.rxChar.addEventListener('characteristicvaluechanged', (event) => {
+    this.rxChar.addEventListener('characteristicvaluechanged', (event: Event) => {
       const value = (event.target as BluetoothRemoteGATTCharacteristic).value;
       if (!value) return;
       const chunk = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
@@ -125,6 +128,7 @@ export class TeslaBleTransport extends EventTarget {
     this.server = null;
     this.device = null;
     this.buffer = new Uint8Array(0);
+    this.writeMode = 'with-response';
   }
 
   async send(payload: Uint8Array): Promise<void> {
@@ -211,14 +215,7 @@ export class TeslaBleTransport extends EventTarget {
     }
     for (let offset = 0; offset < packet.length; offset += this.blockLength) {
       const block = packet.subarray(offset, Math.min(offset + this.blockLength, packet.length));
-      const chunk = block as unknown as BufferSource;
-      if (typeof this.txChar.writeValueWithResponse === 'function') {
-        await this.txChar.writeValueWithResponse(chunk);
-      } else if (typeof this.txChar.writeValueWithoutResponse === 'function') {
-        await this.txChar.writeValueWithoutResponse(chunk);
-      } else {
-        await (this.txChar as any).writeValue(chunk);
-      }
+      await this.writeChunk(block);
     }
   }
 
@@ -226,17 +223,95 @@ export class TeslaBleTransport extends EventTarget {
     if (!(error instanceof DOMException)) {
       return false;
     }
-    if (error.name !== 'DataError') {
+    if (error.name === 'DataError') {
+      if (this.blockLength <= MIN_BLOCK_LENGTH) {
+        return false;
+      }
+      console.warn(
+        `BLE write failed with DataError using block length ${this.blockLength}; falling back to ${MIN_BLOCK_LENGTH}`,
+      );
+      this.blockLength = MIN_BLOCK_LENGTH;
+      return true;
+    }
+    if (error.name === 'NotSupportedError') {
+      return this.tryFallbackWriteMode();
+    }
+    return false;
+  }
+
+  private determineWriteMode(): WriteMode {
+    const props = this.txChar?.properties;
+    if (props?.write || this.supportsWriteWithResponse()) {
+      return 'with-response';
+    }
+    if (props?.writeWithoutResponse || this.supportsWriteWithoutResponse()) {
+      return 'without-response';
+    }
+    return 'with-response';
+  }
+
+  private async writeChunk(block: Uint8Array): Promise<void> {
+    const chunk = block as unknown as BufferSource;
+    if (!this.txChar) {
+      throw new Error('TX characteristic not ready');
+    }
+    if (this.writeMode === 'with-response' && typeof this.txChar.writeValueWithResponse === 'function') {
+      await this.txChar.writeValueWithResponse(chunk);
+      return;
+    }
+    if (this.writeMode === 'without-response' && typeof this.txChar.writeValueWithoutResponse === 'function') {
+      await this.txChar.writeValueWithoutResponse(chunk);
+      return;
+    }
+    // Fallback if the chosen mode is unavailable at runtime.
+    if (this.tryFallbackWriteMode()) {
+      await this.writeChunk(block);
+      return;
+    }
+    if (typeof (this.txChar as any).writeValue === 'function') {
+      await (this.txChar as any).writeValue(chunk);
+      return;
+    }
+    throw new Error('TX characteristic does not support writes');
+  }
+
+  private tryFallbackWriteMode(): boolean {
+    if (!this.txChar) {
       return false;
     }
-    if (this.blockLength <= MIN_BLOCK_LENGTH) {
-      return false;
+    if (this.writeMode === 'with-response' && this.supportsWriteWithoutResponse()) {
+      console.warn('GATT writeValueWithResponse unsupported; switching to writeValueWithoutResponse.');
+      this.writeMode = 'without-response';
+      return true;
     }
-    console.warn(
-      `BLE write failed with DataError using block length ${this.blockLength}; falling back to ${MIN_BLOCK_LENGTH}`,
-    );
-    this.blockLength = MIN_BLOCK_LENGTH;
-    return true;
+    if (this.writeMode === 'without-response' && this.supportsWriteWithResponse()) {
+      console.warn('GATT writeValueWithoutResponse unsupported; switching to writeValueWithResponse.');
+      this.writeMode = 'with-response';
+      return true;
+    }
+    return false;
+  }
+
+  private supportsWriteWithoutResponse(): boolean {
+    if (!this.txChar) return false;
+    const props = this.txChar.properties;
+    if (props && 'writeWithoutResponse' in props) {
+      if (!props.writeWithoutResponse) {
+        return false;
+      }
+    }
+    return typeof this.txChar.writeValueWithoutResponse === 'function';
+  }
+
+  private supportsWriteWithResponse(): boolean {
+    if (!this.txChar) return false;
+    const props = this.txChar.properties;
+    if (props && 'write' in props) {
+      if (!props.write) {
+        return false;
+      }
+    }
+    return typeof this.txChar.writeValueWithResponse === 'function';
   }
 
   private async vinToLocalName(vin: string): Promise<string> {
