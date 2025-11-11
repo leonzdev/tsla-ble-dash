@@ -6,6 +6,7 @@ import {
   DEFAULT_MAX_MESSAGE_SIZE,
   DEFAULT_RX_TIMEOUT_MS,
   WEB_BLUETOOTH_DEFAULT_BLOCK,
+  TESLA_PAIRING_SERVICE_UUID,
 } from './constants';
 
 const MIN_BLOCK_LENGTH = 20; // 23 (ATT default MTU) - 3 byte length header
@@ -52,7 +53,7 @@ export class TeslaBleTransport extends EventTarget {
   }
 
   async requestDevice(): Promise<BluetoothDevice> {
-    const services: BluetoothServiceUUID[] = [TESLA_SERVICE_UUID];
+    const services: BluetoothServiceUUID[] = [TESLA_PAIRING_SERVICE_UUID];
     const mode = this.options.deviceDiscoveryMode ?? DeviceDiscoveryMode.VinPrefixValidation;
     const expectedPrefix = this.options.vin ? await this.vinToLocalName(this.options.vin) : null;
 

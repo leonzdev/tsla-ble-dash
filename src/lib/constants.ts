@@ -1,6 +1,7 @@
 export const TESLA_SERVICE_UUID = '00000211-b2d1-43f0-9b88-960cebf8b91e';
 export const TESLA_TX_CHAR_UUID = '00000212-b2d1-43f0-9b88-960cebf8b91e';
 export const TESLA_RX_CHAR_UUID = '00000213-b2d1-43f0-9b88-960cebf8b91e';
+export const TESLA_PAIRING_SERVICE_UUID = 0x1122;
 export const DEFAULT_MAX_MESSAGE_SIZE = 1024;
 export const DEFAULT_RX_TIMEOUT_MS = 1000;
 export const HEADER_SIZE = 2; // leading uint16 big-endian length prefix
