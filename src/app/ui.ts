@@ -20,7 +20,7 @@ const PROFILE_STORAGE_KEY = 'tsla.profiles';
 const VIN_STORAGE_KEY = 'tsla.vin';
 const REFRESH_INTERVAL_STORAGE_KEY = 'tsla.stateRefreshIntervalMs';
 const DEFAULT_REFRESH_INTERVAL_MS = 1000;
-const MIN_REFRESH_INTERVAL_MS = 250;
+const MIN_REFRESH_INTERVAL_MS = 0;
 const MAX_REFRESH_INTERVAL_MS = 60_000;
 
 interface StoredProfile {
