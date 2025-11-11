@@ -17,6 +17,7 @@ import {
 } from '../lib/crypto';
 
 const PROFILE_STORAGE_KEY = 'tsla.profiles';
+const VIN_STORAGE_KEY = 'tsla.vin';
 
 interface StoredProfile {
   id: string;
@@ -32,14 +33,23 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   const profileNameInput = createInput('Profile Name', 'text');
   const vinInput = createInput('VIN', 'text');
   vinInput.input.placeholder = '5YJ3E1EA7JF000000';
+  const storedVin = loadStoredVin();
+  if (storedVin) {
+    vinInput.input.value = storedVin;
+  }
+  vinInput.input.addEventListener('change', () => {
+    const normalized = normalizeVin(vinInput.input.value);
+    vinInput.input.value = normalized;
+    persistVin(normalized);
+  });
 
   const discoveryModeSelect = createSelect('Device Discovery Mode');
   discoveryModeSelect.select.append(
     option('VIN prefix filter in prompt', DeviceDiscoveryMode.VinPrefixPromptFilter),
-    option('VIN prefix validation after selection (default)', DeviceDiscoveryMode.VinPrefixValidation),
-    option('No VIN prefix checks', DeviceDiscoveryMode.Unfiltered),
+    option('VIN prefix validation after selection', DeviceDiscoveryMode.VinPrefixValidation),
+    option('No VIN prefix checks (default)', DeviceDiscoveryMode.Unfiltered),
   );
-  discoveryModeSelect.select.value = DeviceDiscoveryMode.VinPrefixValidation;
+  discoveryModeSelect.select.value = DeviceDiscoveryMode.Unfiltered;
 
   const privateKeyInput = createTextarea('Private key (PEM)');
   privateKeyInput.textarea.placeholder = 'Paste EC PRIVATE KEY generated via tesla-keygen…';
@@ -268,10 +278,12 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   selectDeviceBtn.button.addEventListener('click', async () => {
     try {
-      const vin = vinInput.input.value.trim();
+      const vin = normalizeVin(vinInput.input.value);
       if (!vin) {
         throw new Error('VIN is required');
       }
+      vinInput.input.value = vin;
+      persistVin(vin);
       const discoveryMode = parseDiscoveryMode(discoveryModeSelect.select.value);
       session = new TeslaBleSession({ vin, deviceDiscoveryMode: discoveryMode });
       await session.connect();
@@ -545,6 +557,40 @@ function parseDiscoveryMode(value: string): DeviceDiscoveryMode {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeVin(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function loadStoredVin(): string {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return '';
+  }
+  try {
+    return storage.getItem(VIN_STORAGE_KEY) ?? '';
+  } catch (error) {
+    console.warn('Failed to load stored VIN', error);
+    return '';
+  }
+}
+
+function persistVin(value: string): void {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+  const normalized = normalizeVin(value);
+  try {
+    if (normalized) {
+      storage.setItem(VIN_STORAGE_KEY, normalized);
+    } else {
+      storage.removeItem(VIN_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn('Failed to persist VIN', error);
+  }
 }
 
 async function loadStoredProfiles(): Promise<StoredProfile[]> {
