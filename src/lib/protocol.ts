@@ -1,5 +1,7 @@
-import { Root } from 'protobufjs';
-import protos from './protos.json';
+import protobuf from 'protobufjs';
+import protos from './protos.json' with { type: 'json' };
+
+const { Root } = protobuf;
 
 const root = Root.fromJSON(protos as any);
 
@@ -193,14 +195,14 @@ export function decodeVehicleData(buffer: Uint8Array): any {
 export function encodeVcsecAddKeyRequest(params: { publicKeyRaw: Uint8Array; role: number; formFactor: number }): Uint8Array {
   const op = VCSEC_WhitelistOperation.create({
     addKeyToWhitelistAndAddPermissions: VCSEC_PermissionChange.create({
-      key: VCSEC_PublicKey.create({ publicKeyRaw: params.publicKeyRaw }),
+      key: VCSEC_PublicKey.create({ PublicKeyRaw: params.publicKeyRaw }),
       keyRole: params.role,
     }),
     metadataForKey: VCSEC_KeyMetadata.create({ keyFormFactor: params.formFactor }),
   });
 
   const unsigned = VCSEC_UnsignedMessage.create({
-    whitelistOperation: op,
+    WhitelistOperation: op,
   });
   const unsignedBytes = VCSEC_UnsignedMessage.encode(unsigned).finish();
 
