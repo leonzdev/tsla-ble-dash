@@ -1,3 +1,4 @@
+import './app/styles.css';
 import { initializeApp } from './app/ui';
 
 document.addEventListener('DOMContentLoaded', () => {
