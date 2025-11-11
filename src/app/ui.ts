@@ -18,6 +18,10 @@ import {
 
 const PROFILE_STORAGE_KEY = 'tsla.profiles';
 const VIN_STORAGE_KEY = 'tsla.vin';
+const REFRESH_INTERVAL_STORAGE_KEY = 'tsla.stateRefreshIntervalMs';
+const DEFAULT_REFRESH_INTERVAL_MS = 1000;
+const MIN_REFRESH_INTERVAL_MS = 250;
+const MAX_REFRESH_INTERVAL_MS = 60_000;
 
 interface StoredProfile {
   id: string;
@@ -67,6 +71,16 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     option.textContent = prettyLabel(value);
     stateSelect.append(option);
   });
+  const refreshIntervalInput = createInput('Refresh Interval (ms)', 'number');
+  refreshIntervalInput.input.min = String(MIN_REFRESH_INTERVAL_MS);
+  refreshIntervalInput.input.step = '100';
+  refreshIntervalInput.input.value = String(loadStoredRefreshInterval());
+  const autoRefreshField = document.createElement('label');
+  autoRefreshField.className = 'tsla-field';
+  autoRefreshField.textContent = 'Auto Refresh';
+  const autoRefreshToggle = document.createElement('input');
+  autoRefreshToggle.type = 'checkbox';
+  autoRefreshField.append(autoRefreshToggle);
 
   const profileButtonsRow = document.createElement('div');
   profileButtonsRow.className = 'tsla-row';
@@ -122,6 +136,14 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   stateLabel.append(stateSelect);
   stateRow.append(stateLabel);
 
+  const autoRefreshRow = document.createElement('div');
+  autoRefreshRow.className = 'tsla-row';
+  autoRefreshRow.append(refreshIntervalInput.wrapper, autoRefreshField);
+
+  const stateResultOutput = document.createElement('pre');
+  stateResultOutput.className = 'tsla-log tsla-log--state';
+  stateResultOutput.textContent = 'Vehicle state output will appear here.';
+
   const logOutput = document.createElement('pre');
   logOutput.className = 'tsla-log';
 
@@ -136,15 +158,34 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     buttonsRow,
     enrollRow,
     stateRow,
+    autoRefreshRow,
+    stateResultOutput,
     logOutput,
   );
 
   let session: TeslaBleSession | null = null;
   let privateKey: CryptoKey | null = null;
   let profiles = await loadStoredProfiles();
+  let autoRefreshTimer: number | null = null;
+  let autoRefreshActive = false;
 
   refreshProfileOptions(profileSelect.select, profiles, null);
   updateProfileButtons();
+  const handleRefreshIntervalChange = () => {
+    const sanitized = sanitizeRefreshInterval(refreshIntervalInput.input.value);
+    refreshIntervalInput.input.value = String(sanitized);
+    persistRefreshInterval(sanitized);
+    restartAutoRefreshTimer();
+  };
+  refreshIntervalInput.input.addEventListener('change', handleRefreshIntervalChange);
+  refreshIntervalInput.input.addEventListener('blur', handleRefreshIntervalChange);
+  autoRefreshToggle.addEventListener('change', () => {
+    if (autoRefreshToggle.checked) {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+  });
 
   generateKeyBtn.button.addEventListener('click', async () => {
     try {
@@ -285,6 +326,11 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       vinInput.input.value = vin;
       persistVin(vin);
       const discoveryMode = parseDiscoveryMode(discoveryModeSelect.select.value);
+      const wasAutoRefreshing = autoRefreshActive;
+      if (wasAutoRefreshing) {
+        stopAutoRefresh({ silent: true });
+        appendLog(logOutput, 'Auto refresh disabled while selecting a new vehicle.');
+      }
       session = new TeslaBleSession({ vin, deviceDiscoveryMode: discoveryMode });
       await session.connect();
       appendLog(logOutput, 'Bluetooth device selected and GATT connected.');
@@ -317,14 +363,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   fetchStateBtn.button.addEventListener('click', async () => {
     try {
-      if (!session) {
-        throw new Error('No session available');
-      }
-      privateKey = await ensurePrivateKey(privateKeyInput.textarea.value.trim(), privateKey);
-      const category = stateSelect.value as StateCategory;
-      appendLog(logOutput, `Requesting vehicle state: ${category}…`);
-      const result = await session.getState(category, privateKey);
-      renderState(logOutput, result);
+      await performVehicleStateFetch('manual');
     } catch (error) {
       reportError(logOutput, error, 'Failed to fetch state');
     }
@@ -393,6 +432,99 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   privateKeyInput.textarea.addEventListener('input', () => {
     privateKey = null;
   });
+
+  async function performVehicleStateFetch(mode: 'manual' | 'auto'): Promise<void> {
+    if (!session) {
+      throw new Error('No session available');
+    }
+    privateKey = await ensurePrivateKey(privateKeyInput.textarea.value.trim(), privateKey);
+    const category = stateSelect.value as StateCategory;
+    if (mode === 'manual') {
+      appendLog(logOutput, `Requesting vehicle state: ${category}…`);
+    }
+    const startedAt = performance.now();
+    const result = await session.getState(category, privateKey);
+    const latencyMs = Math.round(performance.now() - startedAt);
+    renderState(stateResultOutput, result, latencyMs);
+    if (mode === 'manual') {
+      appendLog(logOutput, `Vehicle state updated at ${formatTimestamp(new Date())} (latency ${latencyMs} ms).`);
+    }
+  }
+
+  function startAutoRefresh(): void {
+    if (autoRefreshActive) {
+      return;
+    }
+    autoRefreshActive = true;
+    const currentInterval = getCurrentRefreshInterval();
+    persistRefreshInterval(currentInterval);
+    appendLog(logOutput, 'Auto refresh enabled.');
+    void runAutoRefreshCycle();
+  }
+
+  function stopAutoRefresh(options?: { silent?: boolean }): void {
+    const wasActive = autoRefreshActive;
+    autoRefreshActive = false;
+    if (autoRefreshTimer !== null) {
+      window.clearTimeout(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+    if (autoRefreshToggle.checked) {
+      autoRefreshToggle.checked = false;
+    }
+    if (wasActive && !options?.silent) {
+      appendLog(logOutput, 'Auto refresh disabled.');
+    }
+  }
+
+  async function runAutoRefreshCycle(): Promise<void> {
+    if (!autoRefreshActive) {
+      return;
+    }
+    try {
+      await performVehicleStateFetch('auto');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      appendLog(logOutput, `Auto refresh failed: ${detail}`);
+      console.error('Auto refresh error', error);
+      const wasActive = autoRefreshActive;
+      stopAutoRefresh({ silent: true });
+      if (wasActive) {
+        appendLog(logOutput, 'Auto refresh stopped due to error.');
+      }
+      return;
+    }
+    scheduleNextAutoRefresh();
+  }
+
+  function scheduleNextAutoRefresh(): void {
+    if (!autoRefreshActive) {
+      return;
+    }
+    const delay = getCurrentRefreshInterval();
+    autoRefreshTimer = window.setTimeout(() => {
+      void runAutoRefreshCycle();
+    }, delay);
+  }
+
+  function restartAutoRefreshTimer(): void {
+    if (!autoRefreshActive) {
+      return;
+    }
+    if (autoRefreshTimer !== null) {
+      window.clearTimeout(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+    scheduleNextAutoRefresh();
+  }
+
+  function getCurrentRefreshInterval(): number {
+    const sanitized = sanitizeRefreshInterval(refreshIntervalInput.input.value);
+    if (refreshIntervalInput.input.value !== String(sanitized)) {
+      refreshIntervalInput.input.value = String(sanitized);
+    }
+    return sanitized;
+  }
 
   function updateProfileButtons() {
     const hasSelection = Boolean(
@@ -466,8 +598,10 @@ function reportError(target: HTMLElement, error: unknown, prefix: string): void 
   console.error(prefix, error);
 }
 
-function renderState(log: HTMLElement, result: VehicleStateResult): void {
-  appendLog(log, `State result:\n${JSON.stringify(result.vehicleData, null, 2)}`);
+function renderState(target: HTMLElement, result: VehicleStateResult, latencyMs: number): void {
+  const timestamp = formatTimestamp(new Date());
+  const payload = JSON.stringify(result.vehicleData, null, 2);
+  target.textContent = `Last update (${timestamp}) — Category: ${result.category} — Latency: ${latencyMs} ms\n${payload}`;
 }
 
 function normalizePem(value: string): string {
@@ -499,6 +633,10 @@ function hexToBytes(hex: string): Uint8Array {
     out[i] = parseInt(clean.substr(i * 2, 2), 16);
   }
   return out;
+}
+
+function formatTimestamp(date: Date): string {
+  return date.toLocaleString();
 }
 
 function formatDeviceId(id: string): string {
@@ -590,6 +728,35 @@ function persistVin(value: string): void {
     }
   } catch (error) {
     console.warn('Failed to persist VIN', error);
+  }
+}
+
+function loadStoredRefreshInterval(): number {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return DEFAULT_REFRESH_INTERVAL_MS;
+  }
+  try {
+    const raw = storage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_REFRESH_INTERVAL_MS;
+    }
+    return sanitizeRefreshInterval(raw);
+  } catch (error) {
+    console.warn('Failed to load refresh interval', error);
+    return DEFAULT_REFRESH_INTERVAL_MS;
+  }
+}
+
+function persistRefreshInterval(value: number): void {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(sanitizeRefreshInterval(value)));
+  } catch (error) {
+    console.warn('Failed to persist refresh interval', error);
   }
 }
 
@@ -695,6 +862,17 @@ function refreshProfileOptions(
   } else {
     select.value = '';
   }
+}
+
+function sanitizeRefreshInterval(value: string | number | null | undefined): number {
+  const numeric = typeof value === 'number'
+    ? value
+    : Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_REFRESH_INTERVAL_MS;
+  }
+  const rounded = Math.round(numeric);
+  return Math.min(MAX_REFRESH_INTERVAL_MS, Math.max(MIN_REFRESH_INTERVAL_MS, rounded));
 }
 
 function getLocalStorage(): Storage | null {
