@@ -3,8 +3,8 @@ import {
   VehicleStateResult,
   DeviceDiscoveryMode,
   SelectedDeviceInfo,
-} from '../lib/session';
-import { StateCategory, KeyRole, KeyFormFactor } from '../lib/protocol';
+} from '../../lib/session';
+import { StateCategory, KeyRole, KeyFormFactor } from '../../lib/protocol';
 import {
   generatePrivateKey,
   importPrivateKeyPem,
@@ -13,8 +13,7 @@ import {
   exportPublicKeyPem,
   exportPublicKeyPemFromPrivate,
   publicKeyPemToRaw,
-  publicKeyRawToPem,
-} from '../lib/crypto';
+} from '../../lib/crypto';
 
 const PROFILE_STORAGE_KEY = 'tsla.profiles';
 const VIN_STORAGE_KEY = 'tsla.vin';
@@ -30,102 +29,34 @@ interface StoredProfile {
   publicKeyPem: string;
 }
 
+export interface DebugPageOptions {
+  onVinChange?(vin: string | null): void;
+  onKeyStatusChange?(hasKey: boolean): void;
+  onVehicleState?(category: StateCategory, result: VehicleStateResult | null, latencyMs: number | null): void;
+  onAutoRefreshStateChange?(active: boolean): void;
+}
 
-export async function initializeApp(root: HTMLElement): Promise<void> {
-  root.classList.add('tsla-app');
+export interface DebugPageController {
+  key: 'debug';
+  label: string;
+  element: HTMLElement;
+  initialize(): Promise<void>;
+  handleAutoRefreshToggleRequest(): void;
+}
 
-  const shell = document.createElement('div');
-  shell.className = 'tsla-shell';
-  const content = document.createElement('div');
-  content.className = 'tsla-content';
-  const nav = document.createElement('nav');
-  nav.className = 'tsla-nav';
+export function createDebugPage(options: DebugPageOptions = {}): DebugPageController {
+  const {
+    onVinChange = () => {},
+    onKeyStatusChange = () => {},
+    onVehicleState = () => {},
+    onAutoRefreshStateChange = () => {},
+  } = options;
 
-  const dashboardPage = document.createElement('section');
-  dashboardPage.className = 'tsla-page tsla-dashboard';
-  const debugPage = document.createElement('section');
-  debugPage.className = 'tsla-page tsla-debug';
+  const page = document.createElement('section');
+  page.className = 'tsla-page tsla-debug';
   const debugContent = document.createElement('div');
   debugContent.className = 'tsla-debug__content';
-  debugPage.append(debugContent);
-
-  content.append(dashboardPage, debugPage);
-  shell.append(content, nav);
-  root.append(shell);
-
-  const pages = new Map<string, HTMLElement>([
-    ['dashboard', dashboardPage],
-    ['debug', debugPage],
-  ]);
-  const navButtons = new Map<string, HTMLButtonElement>();
-  const navItems: Array<{ key: string; label: string }> = [
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'debug', label: 'Debug' },
-  ];
-  navItems.forEach(({ key, label }) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'tsla-nav__button';
-    button.textContent = label;
-    button.addEventListener('click', () => setActivePage(key));
-    nav.append(button);
-    navButtons.set(key, button);
-  });
-
-  function setActivePage(target: string) {
-    pages.forEach((page, key) => {
-      const isActive = key === target;
-      page.classList.toggle('is-active', isActive);
-      const button = navButtons.get(key);
-      if (button) {
-        button.classList.toggle('is-active', isActive);
-      }
-    });
-  }
-
-  setActivePage('dashboard');
-
-  const dashboardDisplay = document.createElement('div');
-  dashboardDisplay.className = 'tsla-dashboard__display';
-  const speedValue = document.createElement('div');
-  speedValue.className = 'tsla-dashboard__speed';
-  speedValue.textContent = '--';
-  const gearValue = document.createElement('div');
-  gearValue.className = 'tsla-dashboard__gear';
-  gearValue.textContent = '—';
-  dashboardDisplay.append(speedValue, gearValue);
-
-  const dashboardStatus = document.createElement('div');
-  dashboardStatus.className = 'tsla-dashboard__status';
-  const dashboardVinDisplay = document.createElement('div');
-  dashboardVinDisplay.className = 'tsla-dashboard__status-item';
-  const dashboardKeyDisplay = document.createElement('div');
-  dashboardKeyDisplay.className = 'tsla-dashboard__status-item';
-  dashboardStatus.append(dashboardVinDisplay, dashboardKeyDisplay);
-
-  const dashboardControls = document.createElement('div');
-  dashboardControls.className = 'tsla-dashboard__controls';
-  const orientationButton = document.createElement('button');
-  orientationButton.type = 'button';
-  orientationButton.className = 'tsla-dashboard__button';
-  const autoRefreshButton = document.createElement('button');
-  autoRefreshButton.type = 'button';
-  autoRefreshButton.className = 'tsla-dashboard__button tsla-dashboard__button--primary';
-  dashboardControls.append(orientationButton, autoRefreshButton);
-
-  dashboardPage.append(dashboardDisplay, dashboardStatus, dashboardControls);
-
-  let isLandscape = false;
-  function updateOrientationButton() {
-    orientationButton.textContent = isLandscape ? 'Portrait Layout' : 'Landscape Layout';
-    orientationButton.setAttribute('aria-pressed', isLandscape ? 'true' : 'false');
-  }
-  updateOrientationButton();
-  orientationButton.addEventListener('click', () => {
-    isLandscape = !isLandscape;
-    dashboardPage.classList.toggle('tsla-dashboard--landscape', isLandscape);
-    updateOrientationButton();
-  });
+  page.append(debugContent);
 
   const profileSelect = createSelect('Profile');
   const profileNameInput = createInput('Profile Name', 'text');
@@ -250,72 +181,24 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   let privateKey: CryptoKey | null = null;
   let autoRefreshTimer: number | null = null;
   let autoRefreshActive = false;
-  let profiles = await loadStoredProfiles();
-  const vehicleStateCache = new Map<StateCategory, { result: VehicleStateResult; latencyMs: number }>();
+  let profiles: StoredProfile[] = [];
+  let currentVin = '';
+  let selectedProfileId: string | null = null;
 
-  const storedVin = loadStoredVin();
-  let currentVin = storedVin;
-  if (storedVin) {
-    vinInput.input.value = storedVin;
-  }
-  const storedRefreshInterval = loadStoredRefreshInterval();
-  refreshIntervalInput.input.value = String(storedRefreshInterval);
-
-  function assignPrivateKey(value: CryptoKey | null): CryptoKey | null {
-    privateKey = value;
-    updateDashboardKeyStatus();
-    if (!value) {
-      vehicleStateCache.clear();
-      updateDashboardDriveState();
+  const initialize = async () => {
+    profiles = await loadStoredProfiles();
+    currentVin = loadStoredVin();
+    if (currentVin) {
+      vinInput.input.value = currentVin;
     }
-    return value;
-  }
-
-  function updateDashboardVinDisplay() {
-    dashboardVinDisplay.textContent = currentVin ? `VIN: ${currentVin}` : 'VIN: —';
-  }
-
-  function updateDashboardKeyStatus() {
-    dashboardKeyDisplay.textContent = privateKey ? 'Key: Loaded' : 'Key: Not loaded';
-  }
-
-  function updateDashboardDriveState() {
-    const cached = vehicleStateCache.get(StateCategory.Drive);
-    if (!cached) {
-      speedValue.textContent = '--';
-      gearValue.textContent = '—';
-      return;
-    }
-    const driveState = cached.result.vehicleData?.driveState
-      ?? cached.result.vehicleData?.drive_state
-      ?? null;
-    const speed = parseVehicleSpeed(driveState);
-    speedValue.textContent = formatSpeedDisplay(speed);
-    const shiftRaw = driveState?.shiftState ?? driveState?.shift_state;
-    gearValue.textContent = formatShiftState(shiftRaw);
-  }
-
-  function handleVehicleStateResult(category: StateCategory, result: VehicleStateResult, latencyMs: number) {
-    vehicleStateCache.set(category, { result, latencyMs });
-    if (category === StateCategory.Drive) {
-      updateDashboardDriveState();
-    }
-  }
-
-  function updateAutoRefreshUi() {
-    autoRefreshToggle.checked = autoRefreshActive;
-    autoRefreshButton.textContent = autoRefreshActive ? 'Stop Auto Refresh' : 'Start Auto Refresh';
-    autoRefreshButton.classList.toggle('is-active', autoRefreshActive);
-    autoRefreshButton.setAttribute('aria-pressed', autoRefreshActive ? 'true' : 'false');
-  }
-
-  updateDashboardVinDisplay();
-  updateDashboardKeyStatus();
-  updateDashboardDriveState();
-  updateAutoRefreshUi();
-
-  refreshProfileOptions(profileSelect.select, profiles, null);
-  updateProfileButtons();
+    const storedRefreshInterval = loadStoredRefreshInterval();
+    refreshIntervalInput.input.value = String(storedRefreshInterval);
+    refreshProfileOptions(profileSelect.select, profiles, selectedProfileId);
+    updateProfileButtons();
+    updateAutoRefreshUi();
+    onVinChange(currentVin || null);
+    onKeyStatusChange(Boolean(privateKey));
+  };
 
   const handleRefreshIntervalChange = () => {
     const sanitized = sanitizeRefreshInterval(refreshIntervalInput.input.value);
@@ -323,6 +206,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     persistRefreshInterval(sanitized);
     restartAutoRefreshTimer();
   };
+
   refreshIntervalInput.input.addEventListener('change', handleRefreshIntervalChange);
   refreshIntervalInput.input.addEventListener('blur', handleRefreshIntervalChange);
 
@@ -331,7 +215,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     vinInput.input.value = normalized;
     currentVin = normalized;
     persistVin(normalized);
-    updateDashboardVinDisplay();
+    onVinChange(normalized || null);
   });
 
   autoRefreshToggle.addEventListener('change', () => {
@@ -339,14 +223,6 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       startAutoRefresh();
     } else {
       stopAutoRefresh();
-    }
-  });
-
-  autoRefreshButton.addEventListener('click', () => {
-    if (autoRefreshActive) {
-      stopAutoRefresh();
-    } else {
-      startAutoRefresh();
     }
   });
 
@@ -360,6 +236,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       const publicKeyPem = await exportPublicKeyPem(keyPair.publicKey);
       publicKeyOutput.textarea.value = publicKeyPem;
       profileSelect.select.value = '';
+      selectedProfileId = null;
       profileNameInput.input.value = '';
       updateProfileButtons();
       appendLog(logOutput, 'Generated key pair. Remember to enroll the public key using NFC.');
@@ -370,6 +247,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   profileSelect.select.addEventListener('change', async () => {
     const selectedId = profileSelect.select.value;
+    selectedProfileId = selectedId || null;
     if (!selectedId) {
       profileNameInput.input.value = '';
       privateKeyInput.textarea.value = '';
@@ -381,6 +259,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     const profile = profiles.find((item) => item.id === selectedId);
     if (!profile) {
       profileSelect.select.value = '';
+      selectedProfileId = null;
       updateProfileButtons();
       return;
     }
@@ -408,6 +287,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   newProfileBtn.button.addEventListener('click', () => {
     profileSelect.select.value = '';
+    selectedProfileId = null;
     profileNameInput.input.value = '';
     privateKeyInput.textarea.value = '';
     publicKeyOutput.textarea.value = '';
@@ -424,6 +304,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     profiles = profiles.filter((item) => item.id !== selectedId);
     persistProfiles(profiles);
     profileSelect.select.value = '';
+    selectedProfileId = null;
     profileNameInput.input.value = '';
     privateKeyInput.textarea.value = '';
     publicKeyOutput.textarea.value = '';
@@ -473,6 +354,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       refreshProfileOptions(profileSelect.select, profiles, savedProfileId ?? null);
       if (savedProfileId) {
         profileSelect.select.value = savedProfileId;
+        selectedProfileId = savedProfileId;
       }
       updateProfileButtons();
     } catch (error) {
@@ -489,7 +371,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
       vinInput.input.value = vin;
       currentVin = vin;
       persistVin(vin);
-      updateDashboardVinDisplay();
+      onVinChange(vin);
       const discoveryMode = parseDiscoveryMode(discoveryModeSelect.select.value);
       const wasAutoRefreshing = autoRefreshActive;
       if (wasAutoRefreshing) {
@@ -616,7 +498,7 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
 
   async function fetchCategory(
     category: StateCategory,
-    options: { log?: boolean; render?: boolean } = {},
+    opts: { log?: boolean; render?: boolean } = {},
   ): Promise<void> {
     if (!session) {
       throw new Error('No session available');
@@ -625,8 +507,8 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     if (!key) {
       throw new Error('No private key available');
     }
-    const shouldLog = options.log ?? false;
-    const shouldRender = options.render ?? category === (stateSelect.value as StateCategory);
+    const shouldLog = opts.log ?? false;
+    const shouldRender = opts.render ?? category === (stateSelect.value as StateCategory);
     if (shouldLog) {
       appendLog(logOutput, `Requesting vehicle state: ${category}…`);
     }
@@ -716,13 +598,48 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     return sanitized;
   }
 
+  function assignPrivateKey(value: CryptoKey | null): CryptoKey | null {
+    privateKey = value;
+    onKeyStatusChange(Boolean(value));
+    if (!value) {
+      onVehicleState(StateCategory.Drive, null, null);
+    }
+    return value;
+  }
+
+  function handleVehicleStateResult(category: StateCategory, result: VehicleStateResult, latencyMs: number) {
+    onVehicleState(category, result, latencyMs);
+  }
+
+  function updateAutoRefreshUi() {
+    autoRefreshToggle.checked = autoRefreshActive;
+    onAutoRefreshStateChange(autoRefreshActive);
+  }
+
   function updateProfileButtons() {
     const hasSelection = Boolean(
       profileSelect.select.value && profiles.some((item) => item.id === profileSelect.select.value),
     );
     deleteProfileBtn.button.disabled = !hasSelection;
   }
+
+  return {
+    key: 'debug',
+    label: 'Debug',
+    element: page,
+    async initialize() {
+      await initialize();
+    },
+    handleAutoRefreshToggleRequest() {
+      if (autoRefreshActive) {
+        stopAutoRefresh();
+      } else {
+        startAutoRefresh();
+      }
+    },
+  };
 }
+
 function createInput(labelText: string, type: string) {
   const wrapper = document.createElement('label');
   wrapper.className = 'tsla-field';
@@ -926,11 +843,11 @@ function loadStoredRefreshInterval(): number {
     return DEFAULT_REFRESH_INTERVAL_MS;
   }
   try {
-    const raw = storage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
-    if (!raw) {
+    const storedValue = storage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
+    if (!storedValue) {
       return DEFAULT_REFRESH_INTERVAL_MS;
     }
-    return sanitizeRefreshInterval(raw);
+    return sanitizeRefreshInterval(storedValue);
   } catch (error) {
     console.warn('Failed to load refresh interval', error);
     return DEFAULT_REFRESH_INTERVAL_MS;
@@ -943,7 +860,7 @@ function persistRefreshInterval(value: number): void {
     return;
   }
   try {
-    storage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(sanitizeRefreshInterval(value)));
+    storage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(value));
   } catch (error) {
     console.warn('Failed to persist refresh interval', error);
   }
@@ -963,50 +880,9 @@ async function loadStoredProfiles(): Promise<StoredProfile[]> {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    const results: StoredProfile[] = [];
-    let mutated = false;
-    for (const item of parsed) {
-      if (
-        typeof item === 'object' &&
-        item !== null &&
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        typeof item.privateKeyPem === 'string'
-      ) {
-        let publicKeyPem = typeof item.publicKeyPem === 'string' ? item.publicKeyPem : null;
-        if (!publicKeyPem && typeof item.publicKeyHex === 'string') {
-          try {
-            const rawKey = hexToBytes(item.publicKeyHex);
-            publicKeyPem = await publicKeyRawToPem(rawKey);
-            mutated = true;
-          } catch (error) {
-            console.warn('Failed to convert stored public key hex to PEM', error);
-          }
-        }
-        if (!publicKeyPem) {
-          try {
-            const imported = await importPrivateKeyPem(item.privateKeyPem);
-            publicKeyPem = await exportPublicKeyPemFromPrivate(imported);
-            mutated = true;
-          } catch (error) {
-            console.warn('Failed to derive public key PEM from private key', error);
-            continue;
-          }
-        }
-        results.push({
-          id: item.id,
-          name: item.name,
-          privateKeyPem: item.privateKeyPem,
-          publicKeyPem,
-        });
-      }
-    }
-    if (mutated) {
-      persistProfiles(results);
-    }
-    return results;
+    return parsed.filter((item): item is StoredProfile => Boolean(item && item.id && item.privateKeyPem));
   } catch (error) {
-    console.warn('Failed to parse stored profiles', error);
+    console.warn('Failed to load profiles', error);
     return [];
   }
 }
@@ -1041,10 +917,10 @@ function refreshProfileOptions(
   placeholder.textContent = 'New profile…';
   select.append(placeholder);
   profiles.forEach((profile) => {
-    const option = document.createElement('option');
-    option.value = profile.id;
-    option.textContent = profile.name;
-    select.append(option);
+    const opt = document.createElement('option');
+    opt.value = profile.id;
+    opt.textContent = profile.name;
+    select.append(opt);
   });
   if (selectedId && profiles.some((profile) => profile.id === selectedId)) {
     select.value = selectedId;
@@ -1074,73 +950,4 @@ function getLocalStorage(): Storage | null {
     console.warn('Local storage unavailable', error);
     return null;
   }
-}
-
-function parseVehicleSpeed(driveState: any): number | null {
-  if (!driveState || typeof driveState !== 'object') {
-    return null;
-  }
-  const candidates = [
-    driveState.speedFloat,
-    driveState.speed_float,
-    driveState.speed,
-    driveState.optionalSpeedFloat,
-    driveState.optional_speed_float,
-    driveState.optionalSpeed,
-    driveState.optional_speed,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-      return candidate;
-    }
-    if (candidate && typeof candidate === 'object') {
-      const nested = candidate.speedFloat ?? candidate.speed_float ?? candidate.speed;
-      if (typeof nested === 'number' && Number.isFinite(nested)) {
-        return nested;
-      }
-    }
-  }
-  return null;
-}
-
-function formatSpeedDisplay(value: number | null): string {
-  if (value === null || Number.isNaN(value)) {
-    return '--';
-  }
-  const rounded = Math.max(0, Math.round(value));
-  return String(rounded);
-}
-
-function formatShiftState(raw: any): string {
-  if (!raw) {
-    return '—';
-  }
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return '—';
-    }
-    if (trimmed.length === 1) {
-      return trimmed.toUpperCase();
-    }
-    const match = trimmed.match(/[PRND]/i);
-    if (match) {
-      return match[0].toUpperCase();
-    }
-    return trimmed.toUpperCase();
-  }
-  if (typeof raw === 'object') {
-    for (const key of ['P', 'R', 'N', 'D']) {
-      if (raw[key] != null || raw[key.toLowerCase()] != null) {
-        return key;
-      }
-    }
-    if (raw.Invalid != null || raw.invalid != null) {
-      return '—';
-    }
-    if (typeof raw.type === 'string') {
-      return formatShiftState(raw.type);
-    }
-  }
-  return '—';
 }
