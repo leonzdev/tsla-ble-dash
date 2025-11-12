@@ -50,19 +50,32 @@ textarea {
 
 .tsla-dashboard.is-active {
   display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.tsla-dashboard__stage {
+  display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   gap: 32px;
-  text-align: center;
-  min-height: 100%;
+  width: min(520px, 100%);
+  transition: transform 0.35s ease;
+  transform-origin: center center;
 }
 
 .tsla-dashboard--landscape.tsla-dashboard.is-active {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-evenly;
-  text-align: left;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.tsla-dashboard--landscape .tsla-dashboard__stage {
+  width: min(100vh, 100vw);
+  transform: rotate(90deg);
 }
 
 .tsla-dashboard__display {
@@ -70,10 +83,6 @@ textarea {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-}
-
-.tsla-dashboard--landscape .tsla-dashboard__display {
-  align-items: flex-end;
 }
 
 .tsla-dashboard__speed {
