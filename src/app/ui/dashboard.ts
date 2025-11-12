@@ -32,11 +32,9 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
 
   const status = document.createElement('div');
   status.className = 'tsla-dashboard__status';
-  const vinDisplay = document.createElement('div');
-  vinDisplay.className = 'tsla-dashboard__status-item';
   const keyDisplay = document.createElement('div');
   keyDisplay.className = 'tsla-dashboard__status-item';
-  status.append(vinDisplay, keyDisplay);
+  status.append(keyDisplay);
 
   const controls = document.createElement('div');
   controls.className = 'tsla-dashboard__controls';
@@ -48,7 +46,11 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
   autoRefreshButton.className = 'tsla-dashboard__button tsla-dashboard__button--primary';
   controls.append(orientationButton, autoRefreshButton);
 
-  page.append(display, status, controls);
+  const stage = document.createElement('div');
+  stage.className = 'tsla-dashboard__stage';
+  stage.append(display, status, controls);
+
+  page.append(stage);
 
   let isLandscape = false;
   let autoRefreshActive = false;
@@ -58,9 +60,18 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
     orientationButton.setAttribute('aria-pressed', isLandscape ? 'true' : 'false');
   };
 
+  const applyLandscapeState = () => {
+    page.classList.toggle('tsla-dashboard--landscape', isLandscape);
+    const nav = page.closest('.tsla-shell')?.querySelector<HTMLElement>('.tsla-nav');
+    if (nav) {
+      nav.hidden = isLandscape;
+      nav.toggleAttribute('aria-hidden', isLandscape);
+    }
+  };
+
   orientationButton.addEventListener('click', () => {
     isLandscape = !isLandscape;
-    page.classList.toggle('tsla-dashboard--landscape', isLandscape);
+    applyLandscapeState();
     updateOrientationButton();
   });
 
@@ -68,8 +79,8 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
     onAutoRefreshToggle();
   });
 
+  applyLandscapeState();
   updateOrientationButton();
-  setVinText(vinDisplay, null);
   setKeyText(keyDisplay, false);
   updateAutoRefreshButton(autoRefreshButton, autoRefreshActive);
 
@@ -77,8 +88,8 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
     key: 'dashboard',
     label: 'Dashboard',
     element: page,
-    setVin(value) {
-      setVinText(vinDisplay, value);
+    setVin() {
+      // VIN no longer displayed on dashboard; method kept for API consistency.
     },
     setKeyLoaded(hasKey) {
       setKeyText(keyDisplay, hasKey);
@@ -97,12 +108,16 @@ export function createDashboardPage(options: DashboardPageOptions = {}): Dashboa
   };
 }
 
-function setVinText(target: HTMLElement, value: string | null) {
-  target.textContent = value ? `VIN: ${value}` : 'VIN: —';
-}
-
 function setKeyText(target: HTMLElement, hasKey: boolean) {
-  target.textContent = hasKey ? 'Key: Loaded' : 'Key: Not loaded';
+  if (hasKey) {
+    target.textContent = '';
+    target.hidden = true;
+    target.removeAttribute('aria-live');
+  } else {
+    target.hidden = false;
+    target.textContent = 'Key: Not loaded';
+    target.setAttribute('aria-live', 'polite');
+  }
 }
 
 function updateAutoRefreshButton(button: HTMLButtonElement, active: boolean) {
