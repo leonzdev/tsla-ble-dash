@@ -116,6 +116,7 @@ export class TeslaBleSession {
       ?? new TeslaBleTransport({
         vin: options.vin,
         deviceDiscoveryMode: options.deviceDiscoveryMode,
+        preferredBlockLength: 1024,
       });
     this.routingAddress = randomBytes(16);
   }
