@@ -13,7 +13,8 @@
     "src/lib/constants.ts",
     "src/lib/crypto.ts",
     "src/lib/protocol.ts",
-    "src/lib/bluetooth.ts"
+    "src/lib/bluetooth.ts",
+    "src/lib/ocr.ts"
   ],
   "exclude": ["node_modules"]
 }
