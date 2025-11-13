@@ -1,6 +1,15 @@
 import { StateCategory } from '../../lib/protocol';
 import { createDashboardPage } from './dashboard';
 import { createDebugPage, DebugPageController } from './debug';
+import { createLatencyPage } from './latency';
+
+type PageController = {
+  key: string;
+  label: string;
+  element: HTMLElement;
+  onShow?(): void;
+  onHide?(): void;
+};
 
 export async function initializeApp(root: HTMLElement): Promise<void> {
   root.classList.add('tsla-app');
@@ -38,8 +47,10 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     },
   });
 
+  const latencyController = createLatencyPage();
+
   const navButtons = new Map<string, HTMLButtonElement>();
-  const controllers = [dashboardController, debugController];
+  const controllers: PageController[] = [dashboardController, debugController, latencyController];
 
   controllers.forEach((controller) => {
     content.append(controller.element);
@@ -53,8 +64,15 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   });
 
   function setActivePage(target: string) {
-    controllers.forEach(({ key, element }) => {
+    controllers.forEach((controller) => {
+      const { key, element } = controller;
+      const wasActive = element.classList.contains('is-active');
       const isActive = key === target;
+      if (isActive && !wasActive) {
+        controller.onShow?.();
+      } else if (!isActive && wasActive) {
+        controller.onHide?.();
+      }
       element.classList.toggle('is-active', isActive);
       const button = navButtons.get(key);
       if (button) {
