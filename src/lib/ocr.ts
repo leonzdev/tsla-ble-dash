@@ -6,7 +6,7 @@ const TESSERACT_VERSION = '6.0.1';
 const TESSERACT_CORE_VERSION = '6.0.0';
 
 const WORKER_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/worker.min.js`;
-const CORE_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js-core@${TESSERACT_CORE_VERSION}/dist/`;
+const CORE_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js-core@${TESSERACT_CORE_VERSION}/`;
 const LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0/';
 const IS_BROWSER = typeof window !== 'undefined' && typeof document !== 'undefined';
 
