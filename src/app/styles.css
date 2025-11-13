@@ -360,6 +360,98 @@ textarea {
   box-shadow: 0 14px 30px rgba(37, 99, 235, 0.45);
 }
 
+.tsla-latency__button.is-active {
+  background: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.45);
+}
+
+.tsla-latency__caption {
+  font-size: 13px;
+  color: #cbd5f5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tsla-latency__speed-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.tsla-latency__speed-value {
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.tsla-latency__speed-label {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.tsla-latency__sample-wrap {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.6);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.tsla-latency__sample {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.tsla-latency__sample-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  font-size: 14px;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.tsla-latency__inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+  min-width: 120px;
+}
+
+.tsla-latency__inline-field input {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+  padding: 8px 12px;
+  width: 100%;
+}
+
+.tsla-latency__log {
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 12px;
+  padding: 12px;
+  font-family: 'SFMono-Regular', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  min-height: 80px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
 .tsla-latency__preview {
   position: relative;
   border-radius: 16px;
