@@ -2,7 +2,6 @@ import {
   SpeedOcrAnalyzer,
   type SpeedOcrResult,
   pixelBufferFromImageData,
-  detectDominantDigitRegion,
   createSpeedDigitCrop,
   type BoundingBox,
 } from '../../lib/ocr';
@@ -11,7 +10,7 @@ type FacingMode = 'environment' | 'user';
 type StatusVariant = 'default' | 'success' | 'error';
 type NormalizedRect = { x: number; y: number; width: number; height: number };
 
-const SPEED_SAMPLE_REGION: NormalizedRect = { x: 0.1, y: 0.1, width: 0.4, height: 0.4 };
+const SPEED_SAMPLE_REGION: NormalizedRect = { x: 0.3, y: 0.2, width: 0.4, height: 0.45 };
 const SAMPLE_INTERVAL_DEFAULT = 1000;
 const SAMPLE_INTERVAL_MIN = 250;
 const SAMPLE_INTERVAL_MAX = 5000;
@@ -77,12 +76,17 @@ export function createLatencyPage(): LatencyPageController {
   previewPlaceholder.className = 'tsla-latency__placeholder';
   previewPlaceholder.textContent = 'Camera preview will appear here after you start it.';
   previewArea.append(previewVideo, previewPlaceholder);
+  const captureActions = document.createElement('div');
+  captureActions.className = 'tsla-latency__actions';
+  const sampleOnceButton = createLatencyButton('Sample Frame', true);
+  captureActions.append(sampleOnceButton);
+
   const previewActions = document.createElement('div');
   previewActions.className = 'tsla-latency__actions';
   const previewButton = createLatencyButton('Start Preview', true);
   const flipButton = createLatencyButton('Use Front Camera');
   previewActions.append(previewButton, flipButton);
-  previewCard.append(previewTitle, previewDescription, previewArea, previewActions);
+  previewCard.append(previewTitle, previewDescription, previewArea, captureActions, previewActions);
 
   const ocrCard = document.createElement('div');
   ocrCard.className = 'tsla-latency__card';
@@ -119,7 +123,6 @@ export function createLatencyPage(): LatencyPageController {
   sampleWrapper.append(sampleCanvas, samplePlaceholder);
   const ocrActions = document.createElement('div');
   ocrActions.className = 'tsla-latency__actions';
-  const sampleOnceButton = createLatencyButton('Sample Frame', true);
   const autoSampleButton = createLatencyButton('Start Auto Sampling');
   const intervalField = document.createElement('label');
   intervalField.className = 'tsla-latency__inline-field';
@@ -132,7 +135,7 @@ export function createLatencyPage(): LatencyPageController {
   intervalInput.step = '250';
   intervalInput.value = String(SAMPLE_INTERVAL_DEFAULT);
   intervalField.append(intervalCaption, intervalInput);
-  ocrActions.append(sampleOnceButton, autoSampleButton, intervalField);
+  ocrActions.append(autoSampleButton, intervalField);
   const ocrRawOutput = document.createElement('pre');
   ocrRawOutput.className = 'tsla-latency__log';
   ocrRawOutput.textContent = 'OCR output will appear here.';
@@ -156,9 +159,6 @@ export function createLatencyPage(): LatencyPageController {
   let isSampling = false;
   let autoSampleHandle: number | null = null;
   let isOcrWarm = false;
-  let lastDetectedRegion: BoundingBox | null = null;
-  let lastFrameWidth = 0;
-  let lastFrameHeight = 0;
 
   const captureCanvas = document.createElement('canvas');
   const captureCtx = (() => {
@@ -263,26 +263,13 @@ export function createLatencyPage(): LatencyPageController {
     captureCanvas.width = width;
     captureCanvas.height = height;
     captureCtx.drawImage(previewVideo, 0, 0, width, height);
-    if (width !== lastFrameWidth || height !== lastFrameHeight) {
-      lastDetectedRegion = null;
-      lastFrameWidth = width;
-      lastFrameHeight = height;
-    }
     const frameData = captureCtx.getImageData(0, 0, width, height);
     const frameBuffer = pixelBufferFromImageData(frameData);
-    const detectedRegion = detectDominantDigitRegion(frameBuffer);
-    if (detectedRegion) {
-      lastDetectedRegion = detectedRegion;
-    }
-    const fallbackRegion = lastDetectedRegion ?? createFallbackRegion(width, height);
-    const speedCrop = createSpeedDigitCrop(frameBuffer, { region: fallbackRegion });
+    const staticRegion = getStaticRegion(width, height);
+    const speedCrop = createSpeedDigitCrop(frameBuffer, { region: staticRegion });
     if (!speedCrop) {
       updateSampleVisibility(false);
-      setStatus(
-        ocrStatus,
-        'Unable to isolate the speed digits in this frame. Adjust the camera and try again.',
-        'error',
-      );
+      setStatus(ocrStatus, 'Unable to capture the speed area. Adjust the camera and try again.', 'error');
       if (!options.silent) {
         stopAutoSampling('Auto sampling paused while we retry detection.');
       }
@@ -302,8 +289,13 @@ export function createLatencyPage(): LatencyPageController {
       isOcrWarm = true;
       updateOcrOutputs(result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to run OCR on the sample.';
-      setStatus(ocrStatus, `OCR failed: ${message}`, 'error');
+      const message =
+        error instanceof Error && error.stack
+          ? `${error.message}\n${error.stack}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      setStatus(ocrStatus, `OCR failed:\n${message}`, 'error');
       if (!options.silent) {
         console.error('Failed to run speed OCR', error);
       }
@@ -322,7 +314,7 @@ export function createLatencyPage(): LatencyPageController {
     );
   }
 
-  function createFallbackRegion(width: number, height: number): BoundingBox {
+  function getStaticRegion(width: number, height: number): BoundingBox {
     const regionWidth = Math.max(1, Math.round(width * SPEED_SAMPLE_REGION.width));
     const regionHeight = Math.max(1, Math.round(height * SPEED_SAMPLE_REGION.height));
     const regionX = clampNumber(Math.round(width * SPEED_SAMPLE_REGION.x), 0, width - regionWidth);
