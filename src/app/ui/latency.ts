@@ -14,6 +14,7 @@ const SPEED_SAMPLE_REGION: NormalizedRect = { x: 0.3, y: 0.2, width: 0.4, height
 const SAMPLE_INTERVAL_DEFAULT = 1000;
 const SAMPLE_INTERVAL_MIN = 250;
 const SAMPLE_INTERVAL_MAX = 5000;
+const OFFSCREEN_SUPPORTED = typeof OffscreenCanvas !== 'undefined';
 
 export interface LatencyPageController {
   key: 'latency';
@@ -77,9 +78,18 @@ export function createLatencyPage(): LatencyPageController {
   previewPlaceholder.textContent = 'Camera preview will appear here after you start it.';
   previewArea.append(previewVideo, previewPlaceholder);
   const captureActions = document.createElement('div');
-  captureActions.className = 'tsla-latency__actions';
+  captureActions.className = 'tsla-latency__actions tsla-latency__actions--stacked';
+  const captureRow = document.createElement('div');
+  captureRow.className = 'tsla-latency__actions';
   const sampleOnceButton = createLatencyButton('Sample Frame', true);
-  captureActions.append(sampleOnceButton);
+  const uploadButton = createLatencyButton('Upload Image');
+  const uploadInput = document.createElement('input');
+  uploadInput.type = 'file';
+  uploadInput.accept = 'image/*';
+  uploadInput.hidden = true;
+  captureRow.append(sampleOnceButton, uploadButton);
+  captureActions.append(captureRow);
+  captureActions.append(uploadInput);
 
   const previewActions = document.createElement('div');
   previewActions.className = 'tsla-latency__actions';
@@ -207,6 +217,19 @@ export function createLatencyPage(): LatencyPageController {
     void captureAndRecognize();
   });
 
+  uploadButton.addEventListener('click', () => {
+    uploadInput.click();
+  });
+
+  uploadInput.addEventListener('change', () => {
+    const file = uploadInput.files?.[0];
+    if (!file) {
+      return;
+    }
+    void recognizeFromFile(file);
+    uploadInput.value = '';
+  });
+
   autoSampleButton.addEventListener('click', () => {
     if (autoSampleHandle !== null) {
       stopAutoSampling('Auto sampling stopped.');
@@ -260,11 +283,11 @@ export function createLatencyPage(): LatencyPageController {
     }
     const width = previewVideo.videoWidth;
     const height = previewVideo.videoHeight;
-    captureCanvas.width = width;
-    captureCanvas.height = height;
-    captureCtx.drawImage(previewVideo, 0, 0, width, height);
-    const frameData = captureCtx.getImageData(0, 0, width, height);
-    const frameBuffer = pixelBufferFromImageData(frameData);
+  captureCanvas.width = width;
+  captureCanvas.height = height;
+  captureCtx.drawImage(previewVideo, 0, 0, width, height);
+  const frameData = captureCtx.getImageData(0, 0, width, height);
+  const frameBuffer = pixelBufferFromImageData(frameData);
     const staticRegion = getStaticRegion(width, height);
     const speedCrop = createSpeedDigitCrop(frameBuffer, { region: staticRegion });
     if (!speedCrop) {
@@ -275,10 +298,10 @@ export function createLatencyPage(): LatencyPageController {
       }
       return;
     }
-    renderSampleBuffer(speedCrop);
-    updateSampleVisibility(true);
-    isSampling = true;
-    setSamplingBusy(true);
+  renderSampleBuffer(speedCrop);
+  updateSampleVisibility(true);
+  isSampling = true;
+  setSamplingBusy(true);
     setStatus(
       ocrStatus,
       isOcrWarm ? 'Running OCR…' : 'Initializing OCR engine (first run may take a few seconds)…',
@@ -334,6 +357,7 @@ export function createLatencyPage(): LatencyPageController {
     if (autoSampleHandle === null) {
       autoSampleButton.disabled = state;
     }
+    uploadButton.disabled = state;
   }
 
   function updateOcrOutputs(result: SpeedOcrResult) {
@@ -451,6 +475,49 @@ export function createLatencyPage(): LatencyPageController {
   updateFlipButton();
   updatePlaceholder();
   updateSampleVisibility(false);
+
+  async function recognizeFromFile(file: File): Promise<void> {
+    try {
+      isSampling = true;
+      setStatus(ocrStatus, 'Loading image…', 'default');
+      setSamplingBusy(true);
+      const bitmap = await createImageBitmap(file);
+      const offscreen = document.createElement('canvas');
+      offscreen.width = bitmap.width;
+      offscreen.height = bitmap.height;
+      const ctx = offscreen.getContext('2d');
+      if (!ctx) {
+        throw new Error('Unable to process the uploaded image.');
+      }
+      ctx.drawImage(bitmap, 0, 0);
+      const frameData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      const frameBuffer = pixelBufferFromImageData(frameData);
+      const speedCrop = createSpeedDigitCrop(frameBuffer, { region: getStaticRegion(bitmap.width, bitmap.height) });
+      if (!speedCrop) {
+        updateSampleVisibility(false);
+        setStatus(ocrStatus, 'Unable to crop the uploaded image. Ensure the speed digits are centered.', 'error');
+        return;
+      }
+      renderSampleBuffer(speedCrop);
+      updateSampleVisibility(true);
+      setStatus(ocrStatus, 'Running OCR on uploaded image…', 'default');
+      const result = await speedOcrAnalyzer.recognize(sampleCanvas);
+      isOcrWarm = true;
+      updateOcrOutputs(result);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.stack
+          ? `${error.message}\n${error.stack}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      setStatus(ocrStatus, `OCR failed:\n${message}`, 'error');
+      console.error('Failed to run OCR on uploaded image', error);
+    } finally {
+      isSampling = false;
+      setSamplingBusy(false);
+    }
+  }
 
   return {
     key: 'latency',
