@@ -5,6 +5,7 @@ import {
   createSpeedDigitCrop,
   type BoundingBox,
 } from '../../lib/ocr';
+import { SamSegmenter } from '../../lib/sam';
 
 type FacingMode = 'environment' | 'user';
 type StatusVariant = 'default' | 'success' | 'error';
@@ -14,7 +15,6 @@ const SPEED_SAMPLE_REGION: NormalizedRect = { x: 0.3, y: 0.2, width: 0.4, height
 const SAMPLE_INTERVAL_DEFAULT = 1000;
 const SAMPLE_INTERVAL_MIN = 250;
 const SAMPLE_INTERVAL_MAX = 5000;
-const OFFSCREEN_SUPPORTED = typeof OffscreenCanvas !== 'undefined';
 
 export interface LatencyPageController {
   key: 'latency';
@@ -131,6 +131,16 @@ export function createLatencyPage(): LatencyPageController {
   samplePlaceholder.className = 'tsla-latency__sample-placeholder';
   samplePlaceholder.textContent = 'Sample crop will appear here after you capture a frame.';
   sampleWrapper.append(sampleCanvas, samplePlaceholder);
+  const smartCropField = document.createElement('label');
+  smartCropField.className = 'tsla-latency__switch';
+  const smartCropCheckbox = document.createElement('input');
+  smartCropCheckbox.type = 'checkbox';
+  const smartCropLabel = document.createElement('span');
+  smartCropLabel.textContent = 'Smart Crop (SAM beta)';
+  smartCropField.append(smartCropCheckbox, smartCropLabel);
+  const smartCropStatus = document.createElement('div');
+  smartCropStatus.className = 'tsla-latency__caption';
+  smartCropStatus.textContent = 'Smart crop disabled.';
   const ocrActions = document.createElement('div');
   ocrActions.className = 'tsla-latency__actions';
   const autoSampleButton = createLatencyButton('Start Auto Sampling');
@@ -156,6 +166,8 @@ export function createLatencyPage(): LatencyPageController {
     ocrConfidence,
     ocrStatus,
     sampleWrapper,
+    smartCropField,
+    smartCropStatus,
     ocrActions,
     ocrRawOutput,
   );
@@ -169,6 +181,9 @@ export function createLatencyPage(): LatencyPageController {
   let isSampling = false;
   let autoSampleHandle: number | null = null;
   let isOcrWarm = false;
+  let smartCropEnabled = false;
+  let samSegmenter: SamSegmenter | null = null;
+  let samLoadingPromise: Promise<SamSegmenter> | null = null;
 
   const captureCanvas = document.createElement('canvas');
   const captureCtx = (() => {
@@ -238,6 +253,25 @@ export function createLatencyPage(): LatencyPageController {
     }
   });
 
+  smartCropCheckbox.addEventListener('change', () => {
+    smartCropEnabled = smartCropCheckbox.checked;
+    if (smartCropEnabled) {
+      smartCropStatus.textContent = 'Loading smart crop model (≈100 MB)…';
+      void ensureSamSegmenter()
+        .then(() => {
+          smartCropStatus.textContent = 'Smart crop ready.';
+        })
+        .catch((error) => {
+          smartCropEnabled = false;
+          smartCropCheckbox.checked = false;
+          const message = formatError(error);
+          smartCropStatus.textContent = `Smart crop failed: ${message}`;
+        });
+    } else {
+      smartCropStatus.textContent = 'Smart crop disabled.';
+    }
+  });
+
   function startAutoSampling() {
     if (!ensurePreviewReady()) {
       setStatus(ocrStatus, 'Start the camera preview before enabling auto sampling.', 'error');
@@ -283,49 +317,20 @@ export function createLatencyPage(): LatencyPageController {
     }
     const width = previewVideo.videoWidth;
     const height = previewVideo.videoHeight;
-  captureCanvas.width = width;
-  captureCanvas.height = height;
-  captureCtx.drawImage(previewVideo, 0, 0, width, height);
-  const frameData = captureCtx.getImageData(0, 0, width, height);
-  const frameBuffer = pixelBufferFromImageData(frameData);
-    const staticRegion = getStaticRegion(width, height);
-    const speedCrop = createSpeedDigitCrop(frameBuffer, { region: staticRegion });
-    if (!speedCrop) {
-      updateSampleVisibility(false);
-      setStatus(ocrStatus, 'Unable to capture the speed area. Adjust the camera and try again.', 'error');
-      if (!options.silent) {
-        stopAutoSampling('Auto sampling paused while we retry detection.');
-      }
-      return;
+    captureCanvas.width = width;
+    captureCanvas.height = height;
+    captureCtx.drawImage(previewVideo, 0, 0, width, height);
+    const frameData = captureCtx.getImageData(0, 0, width, height);
+    const frameBuffer = pixelBufferFromImageData(frameData);
+    const bitmapFactory = smartCropEnabled ? () => createImageBitmap(captureCanvas) : undefined;
+    isSampling = true;
+    setSamplingBusy(true);
+    const result = await processFrame(frameBuffer, width, height, bitmapFactory);
+    if (!result && !options.silent) {
+      setStatus(ocrStatus, 'No digits detected in the sampled frame.', 'error');
     }
-  renderSampleBuffer(speedCrop);
-  updateSampleVisibility(true);
-  isSampling = true;
-  setSamplingBusy(true);
-    setStatus(
-      ocrStatus,
-      isOcrWarm ? 'Running OCR…' : 'Initializing OCR engine (first run may take a few seconds)…',
-      'default',
-    );
-    try {
-      const result = await speedOcrAnalyzer.recognize(sampleCanvas);
-      isOcrWarm = true;
-      updateOcrOutputs(result);
-    } catch (error) {
-      const message =
-        error instanceof Error && error.stack
-          ? `${error.message}\n${error.stack}`
-          : error instanceof Error
-            ? error.message
-            : String(error);
-      setStatus(ocrStatus, `OCR failed:\n${message}`, 'error');
-      if (!options.silent) {
-        console.error('Failed to run speed OCR', error);
-      }
-    } finally {
-      isSampling = false;
-      setSamplingBusy(false);
-    }
+    isSampling = false;
+    setSamplingBusy(false);
   }
 
   function ensurePreviewReady(): boolean {
@@ -376,6 +381,102 @@ export function createLatencyPage(): LatencyPageController {
   function updateSampleVisibility(hasSample: boolean) {
     sampleCanvas.hidden = !hasSample;
     samplePlaceholder.hidden = hasSample;
+  }
+
+  async function ensureSamSegmenter(): Promise<SamSegmenter> {
+    if (samSegmenter) {
+      return samSegmenter;
+    }
+    if (!samLoadingPromise) {
+      const instance = new SamSegmenter();
+      samLoadingPromise = instance.load().then(() => {
+        samSegmenter = instance;
+        return instance;
+      });
+    }
+    return samLoadingPromise;
+  }
+
+  async function getSmartCandidates(
+    bitmapFactory: () => Promise<ImageBitmap>,
+    width: number,
+    height: number,
+  ): Promise<BoundingBox[]> {
+    let bitmap: ImageBitmap | null = null;
+    try {
+      smartCropStatus.textContent = 'Running smart crop…';
+      const segmenter = await ensureSamSegmenter();
+      bitmap = await bitmapFactory();
+      const boxes = await segmenter.segment(bitmap, width, height);
+      bitmap.close();
+      bitmap = null;
+      if (!boxes.length) {
+        smartCropStatus.textContent = 'Smart crop found no regions.';
+      } else {
+        smartCropStatus.textContent = `Smart crop found ${boxes.length} region(s).`;
+      }
+      return boxes;
+    } catch (error) {
+      const message = formatError(error);
+      smartCropStatus.textContent = `Smart crop failed: ${message}`;
+      console.error('Smart crop failed', error);
+      return [];
+    } finally {
+      bitmap?.close();
+    }
+  }
+
+  async function processFrame(
+    frameBuffer: ReturnType<typeof pixelBufferFromImageData>,
+    width: number,
+    height: number,
+    bitmapFactory?: () => Promise<ImageBitmap>,
+  ): Promise<SpeedOcrResult | null> {
+    const smartRegions =
+      smartCropEnabled && bitmapFactory ? await getSmartCandidates(bitmapFactory, width, height) : [];
+    const regions = dedupeRegions([...smartRegions, getStaticRegion(width, height)]);
+    if (!regions.length) {
+      return null;
+    }
+    for (let index = 0; index < regions.length; index += 1) {
+      const region = regions[index];
+      const crop = createSpeedDigitCrop(frameBuffer, { region });
+      if (!crop) {
+        continue;
+      }
+      renderSampleBuffer(crop);
+      updateSampleVisibility(true);
+      setStatus(ocrStatus, `Running OCR on region ${index + 1}/${regions.length}…`, 'default');
+      try {
+        const result = await speedOcrAnalyzer.recognize(sampleCanvas);
+        isOcrWarm = true;
+        updateOcrOutputs(result);
+        if (result.speed != null) {
+          setStatus(ocrStatus, `Speed updated (${result.speed}).`, 'success');
+          return result;
+        }
+      } catch (error) {
+        const message = formatError(error);
+        setStatus(ocrStatus, `OCR failed:\n${message}`, 'error');
+        console.error('Failed to run speed OCR', error);
+      }
+    }
+    return null;
+  }
+
+  function dedupeRegions(regions: BoundingBox[]): BoundingBox[] {
+    const seen = new Set<string>();
+    const unique: BoundingBox[] = [];
+    regions.forEach((region) => {
+      const key = `${Math.round(region.x)}-${Math.round(region.y)}-${Math.round(region.width)}-${Math.round(
+        region.height,
+      )}`;
+      if (!seen.has(key) && region.width > 0 && region.height > 0) {
+        seen.add(key);
+        unique.push(region);
+      }
+    });
+    return unique;
   }
 
   function isCameraSupported(): boolean {
@@ -477,43 +578,35 @@ export function createLatencyPage(): LatencyPageController {
   updateSampleVisibility(false);
 
   async function recognizeFromFile(file: File): Promise<void> {
+    let bitmap: ImageBitmap | null = null;
     try {
       isSampling = true;
       setStatus(ocrStatus, 'Loading image…', 'default');
       setSamplingBusy(true);
-      const bitmap = await createImageBitmap(file);
-      const offscreen = document.createElement('canvas');
-      offscreen.width = bitmap.width;
-      offscreen.height = bitmap.height;
-      const ctx = offscreen.getContext('2d');
+      bitmap = await createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d');
       if (!ctx) {
         throw new Error('Unable to process the uploaded image.');
       }
       ctx.drawImage(bitmap, 0, 0);
-      const frameData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const frameBuffer = pixelBufferFromImageData(frameData);
-      const speedCrop = createSpeedDigitCrop(frameBuffer, { region: getStaticRegion(bitmap.width, bitmap.height) });
-      if (!speedCrop) {
-        updateSampleVisibility(false);
-        setStatus(ocrStatus, 'Unable to crop the uploaded image. Ensure the speed digits are centered.', 'error');
-        return;
+      const capturedBitmap = bitmap;
+      const result = await processFrame(frameBuffer, canvas.width, canvas.height, () =>
+        Promise.resolve(capturedBitmap),
+      );
+      if (!result) {
+        setStatus(ocrStatus, 'No digits detected in uploaded image.', 'error');
       }
-      renderSampleBuffer(speedCrop);
-      updateSampleVisibility(true);
-      setStatus(ocrStatus, 'Running OCR on uploaded image…', 'default');
-      const result = await speedOcrAnalyzer.recognize(sampleCanvas);
-      isOcrWarm = true;
-      updateOcrOutputs(result);
     } catch (error) {
-      const message =
-        error instanceof Error && error.stack
-          ? `${error.message}\n${error.stack}`
-          : error instanceof Error
-            ? error.message
-            : String(error);
+      const message = formatError(error);
       setStatus(ocrStatus, `OCR failed:\n${message}`, 'error');
       console.error('Failed to run OCR on uploaded image', error);
     } finally {
+      bitmap?.close();
       isSampling = false;
       setSamplingBusy(false);
     }
@@ -582,4 +675,14 @@ function formatMediaError(error: unknown): string {
     return error.message;
   }
   return 'Unable to start the camera preview.';
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error && error.stack) {
+    return `${error.message}\n${error.stack}`;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }

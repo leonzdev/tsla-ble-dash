@@ -11,6 +11,7 @@
     "test": "tsc --project tsconfig.test.json && node scripts/fix-test-build.mjs && node --experimental-specifier-resolution=node --test test/*.mjs"
   },
   "dependencies": {
+    "onnxruntime-web": "^1.23.2",
     "protobufjs": "^7.2.4",
     "tesseract.js": "^6.0.1",
     "uuid": "^9.0.1"
