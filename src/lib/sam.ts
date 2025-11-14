@@ -112,14 +112,16 @@ export class SamSegmenter {
 
 function imageDataToTensor(imageData: ImageData): ort.Tensor {
   const { width, height, data } = imageData;
-  const size = width * height;
-  const tensorData = new Float32Array(3 * size);
-  for (let i = 0; i < size; i += 1) {
-    const offset = i * 4;
-    const pixelIndex = Math.floor(i);
-    tensorData[pixelIndex] = data[offset];
-    tensorData[size + pixelIndex] = data[offset + 1];
-    tensorData[size * 2 + pixelIndex] = data[offset + 2];
+  const planeSize = width * height;
+  const tensorData = new Float32Array(3 * planeSize);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = y * width + x;
+      const srcOffset = pixelIndex * 4;
+      tensorData[pixelIndex] = data[srcOffset]; // R
+      tensorData[planeSize + pixelIndex] = data[srcOffset + 1]; // G
+      tensorData[planeSize * 2 + pixelIndex] = data[srcOffset + 2]; // B
+    }
   }
   return new ort.Tensor('float32', tensorData, [1, 3, height, width]);
 }
