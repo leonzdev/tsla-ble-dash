@@ -1,4 +1,9 @@
 import * as ort from 'onnxruntime-web';
+
+const ORT_WASM_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/';
+ort.env.wasm.wasmPaths = ORT_WASM_PATH;
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.simd = true;
 import type { BoundingBox } from './ocr';
 
 const SAM_ENCODER_URL = 'https://files.sunu.in/sam_vit_b_01ec64.encoder.preprocess.quant.onnx';
