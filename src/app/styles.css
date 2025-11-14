@@ -262,7 +262,7 @@ textarea {
 }
 
 .tsla-latency__content {
-  max-width: 880px;
+  max-width: 1080px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -273,13 +273,18 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 6px;
 }
 
 .tsla-latency__header h2 {
   margin: 0;
   font-size: 28px;
   letter-spacing: 0.04em;
+}
+
+.tsla-latency__grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .tsla-latency__card {
@@ -291,6 +296,11 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.tsla-latency__telemetry {
+  justify-content: center;
+  min-height: 100%;
 }
 
 .tsla-latency__card-title {
@@ -328,11 +338,6 @@ textarea {
   gap: 12px;
 }
 
-.tsla-latency__actions--stacked {
-  flex-direction: column;
-  align-items: flex-start;
-}
-
 .tsla-latency__button {
   border: none;
   border-radius: 999px;
@@ -351,13 +356,6 @@ textarea {
   box-shadow: 0 10px 22px rgba(37, 99, 235, 0.3);
 }
 
-.tsla-latency__button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
 .tsla-latency__button--primary {
   background: linear-gradient(135deg, #2563eb, #38bdf8);
   color: #0f172a;
@@ -365,96 +363,64 @@ textarea {
   box-shadow: 0 14px 30px rgba(37, 99, 235, 0.45);
 }
 
-.tsla-latency__button.is-active {
-  background: rgba(59, 130, 246, 0.55);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.45);
+.tsla-latency__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-.tsla-latency__caption {
-  font-size: 13px;
-  color: #cbd5f5;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.tsla-latency__speed-readout {
+.tsla-latency__speed-row {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .tsla-latency__speed-value {
-  font-size: clamp(48px, 10vw, 96px);
+  font-size: clamp(48px, 10vw, 112px);
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 .tsla-latency__speed-label {
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.18em;
   font-size: 12px;
   color: #94a3b8;
 }
 
-.tsla-latency__sample-wrap {
-  position: relative;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  background: rgba(15, 23, 42, 0.6);
-  min-height: 160px;
+.tsla-latency__secondary-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.tsla-latency__sample {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.tsla-latency__sample-placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 12px;
-  font-size: 14px;
-  color: #94a3b8;
-  background: rgba(15, 23, 42, 0.65);
-}
-
-.tsla-latency__inline-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.tsla-latency__gear-label {
   font-size: 12px;
+  letter-spacing: 0.18em;
   color: #94a3b8;
-  min-width: 120px;
+  text-transform: uppercase;
 }
 
-.tsla-latency__inline-field input {
+.tsla-latency__gear-value {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.tsla-latency__badge {
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(15, 23, 42, 0.6);
-  color: inherit;
-  padding: 8px 12px;
-  width: 100%;
+  padding: 6px 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
 }
 
-.tsla-latency__log {
-  background: rgba(15, 23, 42, 0.8);
-  border-radius: 12px;
-  padding: 12px;
-  font-family: 'SFMono-Regular', 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
-  color: #e2e8f0;
-  white-space: pre-wrap;
-  min-height: 80px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+.tsla-latency__badge.is-active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
 }
 
 .tsla-latency__preview {

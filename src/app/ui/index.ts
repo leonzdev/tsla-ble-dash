@@ -30,6 +30,8 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     },
   });
 
+  const latencyController = createLatencyPage();
+
   debugController = createDebugPage({
     onVinChange: (vin) => {
       dashboardController.setVin(vin);
@@ -40,14 +42,14 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     onVehicleState: (category, result) => {
       if (category === StateCategory.Drive) {
         dashboardController.updateDriveState(result);
+        latencyController.setVehicleState(result);
       }
     },
     onAutoRefreshStateChange: (active) => {
       dashboardController.setAutoRefreshState(active);
+      latencyController.setAutoRefreshState(active);
     },
   });
-
-  const latencyController = createLatencyPage();
 
   const navButtons = new Map<string, HTMLButtonElement>();
   const controllers: PageController[] = [dashboardController, debugController, latencyController];
@@ -86,6 +88,8 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
   dashboardController.setKeyLoaded(false);
   dashboardController.updateDriveState(null);
   dashboardController.setAutoRefreshState(false);
+  latencyController.setVehicleState(null);
+  latencyController.setAutoRefreshState(false);
 
   await debugController.initialize();
 }
