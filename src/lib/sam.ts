@@ -112,18 +112,17 @@ export class SamSegmenter {
 
 function imageDataToTensor(imageData: ImageData): ort.Tensor {
   const { width, height, data } = imageData;
-  const planeSize = width * height;
-  const tensorData = new Float32Array(3 * planeSize);
+  const tensorData = new Float32Array(width * height * 3);
+  let offset = 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const pixelIndex = y * width + x;
-      const srcOffset = pixelIndex * 4;
-      tensorData[pixelIndex] = data[srcOffset]; // R
-      tensorData[planeSize + pixelIndex] = data[srcOffset + 1]; // G
-      tensorData[planeSize * 2 + pixelIndex] = data[srcOffset + 2]; // B
+      const srcOffset = (y * width + x) * 4;
+      tensorData[offset++] = data[srcOffset]; // R
+      tensorData[offset++] = data[srcOffset + 1]; // G
+      tensorData[offset++] = data[srcOffset + 2]; // B
     }
   }
-  return new ort.Tensor('float32', tensorData, [1, 3, height, width]);
+  return new ort.Tensor('float32', tensorData, [height, width, 3]);
 }
 
 function maskToBoundingBox(maskTensor: ort.Tensor, originalWidth: number, originalHeight: number): BoundingBox | null {
