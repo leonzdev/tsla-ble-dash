@@ -1,16 +1,21 @@
 import * as ort from 'onnxruntime-web';
 
-const ORT_WASM_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/';
-ort.env.wasm.wasmPaths = ORT_WASM_PATH;
+const ORT_WASM_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/';
+ort.env.wasm.wasmPaths = {
+  'ort-wasm.wasm': `${ORT_WASM_PATH}ort-wasm.wasm`,
+  'ort-wasm-simd.wasm': `${ORT_WASM_PATH}ort-wasm-simd.wasm`,
+  'ort-wasm-threaded.wasm': `${ORT_WASM_PATH}ort-wasm-threaded.wasm`,
+  'ort-wasm-simd-threaded.wasm': `${ORT_WASM_PATH}ort-wasm-simd-threaded.wasm`,
+};
 ort.env.wasm.numThreads = 1;
-ort.env.wasm.simd = true;
 import type { BoundingBox } from './ocr';
 
-const SAM_ENCODER_URL = 'https://files.sunu.in/sam_vit_b_01ec64.encoder.preprocess.quant.onnx';
+const SAM_ENCODER_URL = 'https://huggingface.co/spaces/Akbartus/projects/resolve/main/mobilesam.encoder.onnx';
 const SAM_DECODER_URL =
-  'https://raw.githubusercontent.com/sunu/SAM-in-Browser/main/models/sam_vit_b_01ec64.decoder.onnx';
+  'https://cdn.jsdelivr.net/gh/akbartus/MobileSAM-in-the-Browser@main/models/mobilesam.decoder.quant.onnx';
 
 const RESIZE_WIDTH = 1024;
+const RESIZE_HEIGHT = 684;
 const MASK_SIZE = 256;
 const MAX_BOXES = 6;
 
@@ -31,10 +36,10 @@ export class SamSegmenter {
     if (!this.loadingPromise) {
       this.loadingPromise = (async () => {
         this.encoderSession = await ort.InferenceSession.create(SAM_ENCODER_URL, {
-          executionProviders: ['webgl', 'wasm'],
+          executionProviders: ['wasm'],
         });
         this.decoderSession = await ort.InferenceSession.create(SAM_DECODER_URL, {
-          executionProviders: ['webgl', 'wasm'],
+          executionProviders: ['wasm'],
         });
       })();
     }
@@ -46,16 +51,15 @@ export class SamSegmenter {
     if (!this.encoderSession || !this.decoderSession) {
       return [];
     }
-    const resizeHeight = Math.round((image.height / image.width) * RESIZE_WIDTH);
     const canvas = document.createElement('canvas');
     canvas.width = RESIZE_WIDTH;
-    canvas.height = resizeHeight;
+    canvas.height = RESIZE_HEIGHT;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       return [];
     }
-    ctx.drawImage(image, 0, 0, RESIZE_WIDTH, resizeHeight);
-    const imageData = ctx.getImageData(0, 0, RESIZE_WIDTH, resizeHeight);
+    ctx.drawImage(image, 0, 0, RESIZE_WIDTH, RESIZE_HEIGHT);
+    const imageData = ctx.getImageData(0, 0, RESIZE_WIDTH, RESIZE_HEIGHT);
     const inputTensor = imageDataToTensor(imageData);
     const feeds: Record<string, ort.Tensor> = {
       input_image: inputTensor,
@@ -65,10 +69,10 @@ export class SamSegmenter {
     if (!imageEmbeddings) {
       return [];
     }
-    const pointGrid = generatePointGrid(RESIZE_WIDTH, resizeHeight);
+    const pointGrid = generatePointGrid(RESIZE_WIDTH, RESIZE_HEIGHT);
     const maskInput = new ort.Tensor('float32', new Float32Array(MASK_SIZE * MASK_SIZE), [1, 1, MASK_SIZE, MASK_SIZE]);
     const hasMask = new ort.Tensor('float32', new Float32Array([0]), [1]);
-    const origSize = new ort.Tensor('float32', new Float32Array([resizeHeight, RESIZE_WIDTH]), [2]);
+    const origSize = new ort.Tensor('float32', new Float32Array([RESIZE_HEIGHT, RESIZE_WIDTH]), [2]);
     const boxes: SegmentResult[] = [];
     for (const point of pointGrid) {
       const pointCoords = new ort.Tensor('float32', new Float32Array([point.x, point.y, 0, 0]), [1, 2, 2]);

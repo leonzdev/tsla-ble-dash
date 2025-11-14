@@ -136,7 +136,7 @@ export function createLatencyPage(): LatencyPageController {
   const smartCropCheckbox = document.createElement('input');
   smartCropCheckbox.type = 'checkbox';
   const smartCropLabel = document.createElement('span');
-  smartCropLabel.textContent = 'Smart Crop (SAM beta)';
+  smartCropLabel.textContent = 'Smart Crop (MobileSAM beta)';
   smartCropField.append(smartCropCheckbox, smartCropLabel);
   const smartCropStatus = document.createElement('div');
   smartCropStatus.className = 'tsla-latency__caption';
@@ -256,7 +256,7 @@ export function createLatencyPage(): LatencyPageController {
   smartCropCheckbox.addEventListener('change', () => {
     smartCropEnabled = smartCropCheckbox.checked;
     if (smartCropEnabled) {
-      smartCropStatus.textContent = 'Loading smart crop model (≈100 MB)…';
+      smartCropStatus.textContent = 'Loading MobileSAM (~28 MB)…';
       void ensureSamSegmenter()
         .then(() => {
           smartCropStatus.textContent = 'Smart crop ready.';
