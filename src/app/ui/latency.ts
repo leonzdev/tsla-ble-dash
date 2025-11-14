@@ -116,7 +116,7 @@ export function createLatencyPage(): LatencyPageController {
     releaseStream();
     currentStream = stream;
     previewCard.video.srcObject = stream;
-    updatePlaceholder();
+  updatePreviewState();
     void previewCard.video.play().catch(() => {});
   }
 
@@ -126,12 +126,11 @@ export function createLatencyPage(): LatencyPageController {
     }
     currentStream = null;
     previewCard.video.srcObject = null;
-    updatePlaceholder();
+    updatePreviewState();
   }
 
-  function updatePlaceholder() {
-    previewCard.placeholder.hidden = Boolean(currentStream);
-    previewCard.video.hidden = !currentStream;
+  function updatePreviewState() {
+    previewCard.video.classList.toggle('is-idle', !currentStream);
   }
 
   function updatePreviewButton() {
@@ -188,15 +187,12 @@ function createPreviewCard() {
   const previewArea = document.createElement('div');
   previewArea.className = 'tsla-latency__preview';
   const video = document.createElement('video');
-  video.className = 'tsla-latency__video';
+  video.className = 'tsla-latency__video is-idle';
   video.autoplay = true;
   video.playsInline = true;
   video.muted = true;
   video.controls = false;
-  const placeholder = document.createElement('div');
-  placeholder.className = 'tsla-latency__placeholder';
-  placeholder.textContent = 'Preview will appear here once the camera is started.';
-  previewArea.append(video, placeholder);
+  previewArea.append(video);
 
   const actions = document.createElement('div');
   actions.className = 'tsla-latency__actions';
@@ -210,7 +206,7 @@ function createPreviewCard() {
   statusText.textContent = 'Camera idle.';
 
   card.append(title, description, previewArea, actions, statusText);
-  return { element: card, video, placeholder, startButton, flipButton, checkButton, statusText };
+  return { element: card, previewArea, video, startButton, flipButton, checkButton, statusText };
 }
 
 function createTelemetryCard() {
