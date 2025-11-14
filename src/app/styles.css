@@ -437,23 +437,17 @@ textarea {
 
 .tsla-latency__video {
   width: 100%;
-  height: 100%;
   object-fit: cover;
   display: block;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.7);
+  min-height: 220px;
 }
 
-.tsla-latency__placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 14px;
-  line-height: 1.4;
-  background: rgba(2, 6, 23, 0.5);
+.tsla-latency__video.is-idle {
+  opacity: 0.6;
+  filter: grayscale(0.2);
 }
 
 @media (min-width: 768px) {
