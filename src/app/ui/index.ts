@@ -30,7 +30,11 @@ export async function initializeApp(root: HTMLElement): Promise<void> {
     },
   });
 
-  const latencyController = createLatencyPage();
+  const latencyController = createLatencyPage({
+    onAutoRefreshToggle: () => {
+      debugController.handleAutoRefreshToggleRequest();
+    },
+  });
 
   debugController = createDebugPage({
     onVinChange: (vin) => {

@@ -5,6 +5,10 @@ type FacingMode = 'environment' | 'user';
 const DEFAULT_SPEED_DISPLAY = '--';
 const DEFAULT_GEAR_DISPLAY = '—';
 
+export interface LatencyPageOptions {
+  onAutoRefreshToggle?: () => void;
+}
+
 export interface LatencyPageController {
   key: 'latency';
   label: string;
@@ -14,7 +18,9 @@ export interface LatencyPageController {
   setAutoRefreshState(active: boolean): void;
 }
 
-export function createLatencyPage(): LatencyPageController {
+export function createLatencyPage(options: LatencyPageOptions = {}): LatencyPageController {
+  const { onAutoRefreshToggle = () => {} } = options;
+
   const page = document.createElement('section');
   page.className = 'tsla-page tsla-latency';
 
@@ -158,11 +164,16 @@ export function createLatencyPage(): LatencyPageController {
   function setAutoRefreshState(active: boolean) {
     telemetryCard.refreshBadge.textContent = active ? 'Auto refresh on' : 'Auto refresh off';
     telemetryCard.refreshBadge.classList.toggle('is-active', active);
+    updateAutoRefreshButton(telemetryCard.autoRefreshButton, active);
   }
 
   function onHide() {
     stopPreview();
   }
+
+  telemetryCard.autoRefreshButton.addEventListener('click', () => {
+    onAutoRefreshToggle();
+  });
 
   return {
     key: 'latency',
@@ -243,8 +254,20 @@ function createTelemetryCard() {
   refreshBadge.textContent = 'Auto refresh off';
   secondaryRow.append(gearLabel, gearValue, refreshBadge);
 
-  card.append(title, description, speedRow, secondaryRow);
-  return { element: card, speedValue, gearValue, refreshBadge };
+  const controlsRow = document.createElement('div');
+  controlsRow.className = 'tsla-latency__actions';
+  const autoRefreshButton = createLatencyButton('Start Auto Refresh', true);
+  autoRefreshButton.setAttribute('aria-pressed', 'false');
+  controlsRow.append(autoRefreshButton);
+
+  card.append(title, description, speedRow, secondaryRow, controlsRow);
+  return { element: card, speedValue, gearValue, refreshBadge, autoRefreshButton };
+}
+
+function updateAutoRefreshButton(button: HTMLButtonElement, active: boolean) {
+  button.textContent = active ? 'Stop Auto Refresh' : 'Start Auto Refresh';
+  button.classList.toggle('is-active', active);
+  button.setAttribute('aria-pressed', active ? 'true' : 'false');
 }
 
 function createLatencyButton(label: string, primary = false): HTMLButtonElement {
